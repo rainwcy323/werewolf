@@ -175,7 +175,7 @@ function roleCardEl(roleKey, extraNotes) {
   return h('div', { class: 'rolecard ' + r.team },
     h('div', { class: 'ricon' }, r.icon),
     h('div', { class: 'rname' }, r.name),
-    h('div', { class: 'rteam' }, r.team === 'wolf' ? '狼人陣營' : r.cat === 'god' ? '好人陣營・神職' : '好人陣營・平民'),
+    h('div', { class: 'rteam' }, r.team === 'wolf' ? '狼人陣營' : r.team === 'third' ? '第三方' : r.cat === 'god' ? '好人陣營・神職' : '好人陣營・平民'),
     h('p', { class: 'rdesc' }, r.desc),
     extraNotes && extraNotes.length ? h('ul', { class: 'notes' }, extraNotes.map(n => h('li', null, n))) : null);
 }
@@ -188,7 +188,7 @@ function renderStrip(pub, extra) {
     h('div', { class: 'phase' }, phase, extra || null),
     h('div', { class: 'seats' }, pub.players.map(p =>
       h('span', { class: 'seat' + (p.alive ? '' : ' dead'), title: p.name },
-        p.seat, p.sheriff ? h('em', null, '🎖️') : null, p.idiot ? h('em', null, '🤪') : null,
+        p.seat, p.sheriff ? h('em', null, '🎖️') : null, p.idiot ? h('em', null, '🤪') : null, p.silenced ? h('em', null, '🤐') : null,
         p.role ? h('em', null, ROLES[p.role].icon) : null))));
 }
 
@@ -216,8 +216,8 @@ function gameOverScreen(S, result, buttons) {
   const root = h('div', { class: 'screen' },
     h('h2', null, result ? '遊戲結束' : '遊戲中斷'),
     h('div', { class: 'big ' + rt.tone }, rt.title),
-    h('div', { class: 'reveal' }, S.players.map(p => h('div', { class: 'rv ' + ROLES[p.role].team + (p.alive ? '' : ' dead') },
-      h('b', null, p.seat + '號'), h('span', null, p.name), h('span', { class: 'rr' }, ROLES[p.role].icon + ' ' + ROLES[p.role].name),
+    h('div', { class: 'reveal' }, S.players.map(p => h('div', { class: 'rv ' + team(p) + (p.alive ? '' : ' dead') },
+      h('b', null, p.seat + '號'), h('span', null, p.name), h('span', { class: 'rr' }, ROLES[p.role].icon + ' ' + roleName(p)),
       h('small', null, (p.alive ? '存活' : CAUSE[p.cause]) + (p.lover != null ? ' 💞' : '') + (S.sheriff === p.id ? ' 🎖️' : ''))))),
     h('details', { class: 'log' }, h('summary', null, '上帝視角紀錄'), h('pre', null, S.log.join('\n'))));
   if (buttons) root.append(h('div', { class: 'btns' }, buttons));
@@ -232,21 +232,35 @@ function setupEditor(state, onChange) {
   const draw = () => {
     wrap.innerHTML = '';
     const total = countRoles(state.counts);
-    const ok = total === state.n && ROLE_ORDER.some(k => state.counts[k] && ROLES[k].team === 'wolf') && total > 0;
-    wrap.append(h('div', { class: 'row between' },
-      h('h3', null, '角色配置'),
-      h('button', { class: 'btn ghost small', onclick: () => { state.counts = presetFor(state.n); draw(); onChange(); } }, '套用建議板子')));
-    wrap.append(h('p', { class: 'hint ' + (ok ? 'okc' : 'bad') }, `已選 ${total} / ${state.n} 人` + (ok ? ' ✔' : total !== state.n ? '（角色數需等於人數）' : '（至少需要一名狼人）')));
-    const list = h('div', { class: 'roles' });
-    for (const k of ROLE_ORDER) {
-      const r = ROLES[k], c = state.counts[k] || 0;
-      list.append(h('div', { class: 'rrow ' + r.team },
-        h('span', { class: 'ri' }, r.icon), h('span', { class: 'rn' }, r.name),
-        h('button', { class: 'step', disabled: c <= 0, onclick: () => { state.counts[k] = c - 1; draw(); onChange(); } }, '−'),
-        h('b', { class: 'rc' }, c),
-        h('button', { class: 'step', disabled: c >= r.max, onclick: () => { state.counts[k] = c + 1; draw(); onChange(); } }, '+')));
+    const need = cardsNeeded(state.n, state.counts);
+    const ok = total === need && ROLE_ORDER.some(k => state.counts[k] && ROLES[k].team === 'wolf');
+    const same = (a, b) => ROLE_ORDER.every(k => (a[k] || 0) === (b[k] || 0));
+
+    // 建議板子
+    const presets = presetsFor(state.n);
+    wrap.append(h('h3', null, `建議板子（${state.n} 人）`));
+    if (presets.length) {
+      wrap.append(h('div', { class: 'presets' }, presets.map(p => h('button', {
+        class: 'preset' + (same(p.counts, state.counts) ? ' on' : ''),
+        onclick: () => { state.counts = Object.assign({}, p.counts); Object.assign(state.settings, p.settings); draw(); onChange(); },
+      }, h('b', null, p.name), h('small', null, roleSummary(p.counts)), h('i', null, p.desc)))));
+    } else wrap.append(h('p', { class: 'hint' }, '此人數沒有內建板子，請自行配置。'));
+
+    wrap.append(h('h3', null, '角色配置（可自行調整）'));
+    wrap.append(h('p', { class: 'hint ' + (ok ? 'okc' : 'bad') }, `已選 ${total} / ${need} 張` + (state.counts.thief ? '（含盜賊的 2 張底牌）' : '') +
+      (ok ? ' ✔' : total !== need ? `（牌數需等於${state.counts.thief ? '人數＋2' : '人數'}）` : '（至少需要一名狼人）')));
+    for (const [g, gname] of ROLE_GROUPS) {
+      const list = h('div', { class: 'roles' });
+      for (const k of ROLE_ORDER.filter(k => ROLES[k].group === g)) {
+        const r = ROLES[k], c = state.counts[k] || 0;
+        list.append(h('div', { class: 'rrow ' + r.team, title: r.desc },
+          h('span', { class: 'ri' }, r.icon), h('span', { class: 'rn' }, r.name),
+          h('button', { class: 'step', disabled: c <= 0, onclick: () => { state.counts[k] = c - 1; draw(); onChange(); } }, '−'),
+          h('b', { class: 'rc' }, c),
+          h('button', { class: 'step', disabled: c >= r.max, onclick: () => { state.counts[k] = c + 1; draw(); onChange(); } }, '+')));
+      }
+      wrap.append(h('h4', { class: 'grp' }, gname), list);
     }
-    wrap.append(list);
 
     const st = state.settings;
     const sel = (label, key, options) => h('label', { class: 'set' }, h('span', null, label),
@@ -283,9 +297,21 @@ const RULES_HTML = `
 <h4>流程</h4>
 <ol>
 <li><b>發身分</b>：每位玩家私下查看自己的角色。</li>
-<li><b>夜晚</b>（依序）：丘比特（首夜）→ 情侶確認 → 守衛 → 狼人 → 女巫 → 預言家。已死亡角色仍會被「點名」並假等待數秒，避免洩漏資訊。</li>
-<li><b>白天</b>：首日競選警長 → 公布昨晚死亡 → 死亡技能／遺言 → 依序發言 → 放逐投票 → 進入黑夜。</li>
+<li><b>夜晚</b>（依序，只會叫本局有的角色）：夢魘 → 占卜師 → 盜賊（首夜）→ 丘比特（首夜）→ 情侶確認（首夜）→ 野孩子（首夜）→ 守衛 → 魔術師 → 狼人 → 狼美人 → 隱狼（首夜）→ 石像鬼 → 女巫 → 預言家 → 守墓人（第二夜起）→ 禁言長老 → 攝夢人 → 獵魔人（第二夜起）→ 烏鴉。已死亡的角色仍會被「點名」並假等待數秒，避免洩漏資訊。</li>
+<li><b>白天</b>：首日競選警長 → 公布昨晚死亡（含熊是否咆哮、誰被禁言）→ 死亡技能／遺言 → 依序發言 → 放逐投票 → 進入黑夜。</li>
 </ol>
+<h4>特殊角色的結算細節</h4>
+<ul>
+<li><b>魔術師</b>：交換後，當晚所有指向其中一人的技能（刀、守、救、毒、查驗、夢遊、狩獵、禁言、詛咒）都改落到另一人身上。女巫看到的刀口號碼仍是狼人選的號碼。</li>
+<li><b>夢魘</b>：最先行動，被恐懼的神職當晚只會看到「被恐懼」提示；恐懼到任何狼人時，狼隊當晚不能刀人。</li>
+<li><b>血月使徒</b>：自爆後的下一晚，所有神職只會看到「血月之夜」提示，當晚死亡的獵人也不能開槍。</li>
+<li><b>惡靈騎士</b>：夜晚的刀、毒、狩獵都殺不死他。第一個毒他的女巫或查驗他的預言家，會在隔天早上死亡（女巫比預言家先行動，兩人同晚觸發時只有女巫死亡）。查驗結果仍顯示狼人。</li>
+<li><b>攝夢人</b>：夢遊者當晚免疫刀、毒與狩獵；攝夢人當晚死亡或連續兩晚選同一人，夢遊者會死亡。</li>
+<li><b>隱狼／石像鬼</b>：刀人順序為「會睜眼的狼」→ 全死後由隱狼刀 → 最後只剩石像鬼時由石像鬼刀。</li>
+<li><b>老流氓</b>：被毒或被開槍時，撐到下一次入夜才死亡，並在隔天早上一起公布。</li>
+<li><b>盜賊</b>：配置盜賊時，牌數＝人數＋2，多出的兩張就是底牌。</li>
+<li><b>炸彈人</b>：只在被投票放逐時能引爆，炸死這一輪所有投他的人。他不影響好人或狼人的勝負判定。</li>
+</ul>
 <h4>例外規則（可在設定中調整）</h4>
 <ul>
 <li><b>同守同救</b>：守衛與女巫同時保護被刀的人，預設「奶穿」死亡。</li>

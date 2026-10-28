@@ -193,7 +193,7 @@ class Host {
     const state = this.cfg;
     if (state.n !== this.members.length) {
       state.n = this.members.length;
-      if (state.n >= 6 && countRoles(state.counts) !== state.n) state.counts = presetFor(state.n);
+      if (state.n >= 6 && countRoles(state.counts) !== cardsNeeded(state.n, state.counts)) state.counts = presetFor(state.n);
     }
     const editor = setupEditor(state, () => { saveJSON('ww.hostcfg', this.cfg); start.disabled = !canStart(); this.refresh(); });
     const canStart = () => editor.dataset.ok && this.members.length >= 6;
@@ -290,11 +290,11 @@ class HostIO {
     const pr = pid != null ? this.prompts.get(pid) : null;
     const v = {
       pub: publicView(S), screen, prompt: pr ? pr.spec : null,
-      me: p ? { seat: p.seat, name: p.name, role: p.role, alive: p.alive, notes: p.notes, canVote: p.canVote } : null,
+      me: p ? { seat: p.seat, name: p.name, role: p.role, alive: p.alive, notes: notesOf(p), canVote: p.canVote, converted: p.converted } : null,
       actions: this.actionsFor(pid, isHost),
     };
     if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log,
-      players: S.players.map(q => ({ seat: q.seat, name: q.name, role: q.role, alive: q.alive, cause: q.cause, lover: q.lover, id: q.id })) };
+      players: S.players.map(q => ({ seat: q.seat, name: q.name, role: q.role, alive: q.alive, cause: q.cause, lover: q.lover, id: q.id, converted: q.converted, wasThief: q.wasThief })) };
     return v;
   }
 
@@ -395,7 +395,7 @@ class HostIO {
               res(top[Math.floor(Math.random() * top.length)]);
               return;
             }
-            this.prompts.set(w, { spec: { id: id + '-w' + w, night: true, title: '🐺 已確認', text: '等待其他狼人確認…（若意見不同，以多數決，平手隨機）', options: spec.options.map(o => Object.assign({}, o, { disabled: true })), marks: {} } });
+            this.prompts.set(w, { spec: { id: id + '-w' + w, night: true, title: '🐺 已確認', text: '等待其他狼人確認…（若意見不同，以多數決，平手隨機）', options: (spec.options || []).map(o => Object.assign({}, o, { disabled: true })), marks: {} } });
             refresh();
           },
         });
@@ -466,7 +466,7 @@ class HostIO {
   async revealRoles() {
     const S = this.S;
     await this.askAll(S.players.map(p => p.id), pid => ({
-      title: '🎴 你的身分', roleCard: S.players[pid].role, text: S.players[pid].notes.join('\n'),
+      title: '🎴 你的身分', roleCard: S.players[pid].role, text: notesOf(S.players[pid]).join('\n'),
       buttons: [{ id: 'ok', label: '我已確認身分' }],
     }), '🎴 等待所有玩家確認身分');
     await this.announce({ title: '✅ 身分確認完畢', text: '之後可隨時點上方「🎴 我的身分」查看。\n主機按下開始後進入第一夜。', buttons: [{ id: 'ok', label: '進入黑夜' }] });

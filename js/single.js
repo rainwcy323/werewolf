@@ -202,7 +202,7 @@ class SingleIO {
     await this.show({ title: '🎴 發身分', text: '請依座位順序輪流拿起裝置查看自己的身分，看完後隱藏並傳給下一位。', buttons: [{ id: 'ok', label: '開始' }] });
     for (const p of S.players) {
       await this.show({ title: '🎴 發身分', big: `請 ${lbl(p)} 拿起裝置`, text: '其他玩家請勿觀看', buttons: [{ id: 'ok', label: `我是 ${p.seat}號，查看身分` }] });
-      await this.show({ who: lbl(p), roleCard: p.role, text: p.notes.join('\n'), buttons: [{ id: 'ok', label: '記住了，隱藏' }] });
+      await this.show({ who: lbl(p), roleCard: p.role, text: notesOf(p).join('\n'), buttons: [{ id: 'ok', label: '記住了，隱藏' }] });
     }
     await this.show({ title: '✅ 身分發放完畢', text: '請把裝置放在桌子中央，準備進入第一夜。\n記得把音量開大！', buttons: [{ id: 'ok', label: '進入黑夜' }] });
   }
@@ -215,7 +215,7 @@ class SingleIO {
     const p = S.players[a.sel];
     const b = await overlayAsk({ big: `請 ${lbl(p)} 拿起裝置`, text: '其他玩家請勿觀看', buttons: [{ id: 'ok', label: '查看' }, { id: 'cancel', label: '取消', style: 'ghost' }] });
     if (b.btn !== 'ok') return;
-    await overlayAsk({ who: lbl(p), roleCard: p.role, text: p.notes.join('\n'), buttons: [{ id: 'ok', label: '隱藏' }] });
+    await overlayAsk({ who: lbl(p), roleCard: p.role, text: notesOf(p).join('\n'), buttons: [{ id: 'ok', label: '隱藏' }] });
   }
 
   async gameOver(result) {

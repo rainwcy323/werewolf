@@ -55,13 +55,41 @@ class SingleIO {
   }
 
   update() {
+    if (this.aborted) return;
     const S = this.S;
-    const peek = S.phase === 'day' ? h('button', { class: 'btn ghost tiny', onclick: () => this.peekRole() }, '🔍 查看身分') : null;
-    this.stripEl.replaceChildren(renderStrip(publicView(S), peek));
+    const tools = h('span', { class: 'tools' },
+      S.phase === 'day' ? h('button', { class: 'btn ghost tiny', onclick: () => this.peekRole() }, '🔍 查看身分') : null,
+      S.phase !== 'over' ? h('button', { class: 'btn ghost tiny', onclick: () => this.abort() }, '⏹ 中斷遊戲') : null);
+    this.stripEl.replaceChildren(renderStrip(publicView(S), tools));
     document.body.classList.toggle('is-night', S.phase === 'night');
   }
 
+  async abort() {
+    const a = await overlayAsk({ title: '⏹ 中斷遊戲', text: '確定要中斷這局遊戲嗎？進度將不會保留。', buttons: [
+      { id: 'end', label: '中斷並公布身分', style: 'danger' },
+      { id: 'quit', label: '直接中斷', style: 'ghost' },
+      { id: 'cancel', label: '繼續遊戲', style: 'ghost' },
+    ] });
+    if (a.btn === 'cancel') return;
+    // 讓引擎停在目前等待的地方，之後的所有 io 呼叫都不再回應
+    this.aborted = true;
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    delete document.body.dataset.playing;
+    document.body.classList.remove('is-night');
+    if (a.btn === 'quit') { singleSetup(); return; }
+    const pub = publicView(this.S);
+    pub.phase = 'over';
+    pub.players.forEach(p => { p.role = this.S.players[p.id].role; });
+    this.stripEl.replaceChildren(renderStrip(pub));
+    const scr = gameOverScreen(this.S, null, [
+      h('button', { class: 'btn primary', onclick: singleSetup }, '再來一局'),
+      h('button', { class: 'btn ghost', onclick: home }, '回首頁'),
+    ]);
+    this.main.replaceChildren(scr);
+  }
+
   show(spec) {
+    if (this.aborted) return new Promise(() => {});
     return new Promise(res => {
       this.main.replaceChildren(renderScreen(spec, a => res(a)));
       window.scrollTo(0, 0);
@@ -69,6 +97,7 @@ class SingleIO {
   }
 
   async narrate(text) {
+    if (this.aborted) return new Promise(() => {});
     const night = this.S.phase === 'night';
     this.main.replaceChildren(h('div', { class: 'screen narr' + (night ? ' night' : '') },
       h('div', { class: 'big' }, text), h('p', { class: 'wait' }, night ? '🌙 夜晚進行中，未被點名的玩家請閉眼' : '')));
@@ -76,6 +105,7 @@ class SingleIO {
   }
 
   async idle() {
+    if (this.aborted) return new Promise(() => {});
     this.main.replaceChildren(h('div', { class: 'screen narr night' }, h('div', { class: 'big' }, '……'), h('p', { class: 'wait' }, '請稍候')));
     await sleep(5000 + Math.random() * 5000);
   }

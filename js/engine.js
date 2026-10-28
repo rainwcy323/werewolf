@@ -200,6 +200,7 @@ async function nightPhase(S, io) {
   } else await io.idle();
   await io.narrate('狼人請閉眼');
 
+  // 不論藥是否用過，每晚都依序詢問解藥與毒藥，避免從流程長短推測女巫狀態
   await step(S, io, 'witch', '女巫請睜眼', '女巫請閉眼', async p => {
     let saved = false;
     if (S.witch.antidote) {
@@ -219,21 +220,24 @@ async function nightPhase(S, io) {
         N.save = v.id; S.witch.antidote = false; saved = true;
         S.log.push('女巫使用解藥救 ' + lbl(v));
       }
-    }
-    if (saved) return;
-    if (S.witch.poison) {
-      const a = await io.ask(p.id, {
-        night: true, title: '🧪 女巫・毒藥',
-        text: (S.witch.antidote ? '' : '解藥已用完，你不會得知今晚的刀口。\n') + '是否使用毒藥？',
-        options: alive(S).map(q => opt(q)), select: 'one',
-        buttons: [{ id: 'poison', label: '毒殺', style: 'danger', needSel: true }, { id: 'skip', label: '不使用', style: 'ghost' }],
-      });
-      if (a.btn === 'poison') {
-        N.poison = a.sel; S.witch.poison = false;
-        S.log.push('女巫毒殺 ' + lbl(S.players[a.sel]));
-      }
     } else {
-      await io.ask(p.id, { night: true, title: '🧪 女巫', text: '你的解藥與毒藥都已用完。', buttons: [{ id: 'ok', label: '知道了' }] });
+      await io.ask(p.id, {
+        night: true, title: '🧪 女巫・解藥', big: '解藥已使用',
+        text: '你已經用過解藥，不會得知今晚的刀口。',
+        buttons: [{ id: 'save', label: '使用解藥', disabled: true }, { id: 'skip', label: '繼續', style: 'ghost' }],
+      });
+    }
+    const canPoison = S.witch.poison && !saved;
+    const a = await io.ask(p.id, {
+      night: true, title: '🧪 女巫・毒藥',
+      big: !S.witch.poison ? '毒藥已使用' : null,
+      text: !S.witch.poison ? '你已經用過毒藥。' : saved ? '今晚已使用解藥，同一晚不能再使用毒藥。' : '是否使用毒藥？',
+      options: alive(S).map(q => opt(q, { disabled: !canPoison })), select: 'one',
+      buttons: [{ id: 'poison', label: '毒殺', style: 'danger', needSel: true, disabled: !canPoison }, { id: 'skip', label: canPoison ? '不使用' : '繼續', style: 'ghost' }],
+    });
+    if (canPoison && a.btn === 'poison') {
+      N.poison = a.sel; S.witch.poison = false;
+      S.log.push('女巫毒殺 ' + lbl(S.players[a.sel]));
     }
   });
 

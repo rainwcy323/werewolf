@@ -212,9 +212,9 @@ function overlayAsk(spec) {
 }
 
 function gameOverScreen(S, result, buttons) {
-  const rt = RESULT_TEXT[result];
+  const rt = RESULT_TEXT[result] || { title: '⏹ 遊戲已中斷', tone: '' };
   const root = h('div', { class: 'screen' },
-    h('h2', null, '遊戲結束'),
+    h('h2', null, result ? '遊戲結束' : '遊戲中斷'),
     h('div', { class: 'big ' + rt.tone }, rt.title),
     h('div', { class: 'reveal' }, S.players.map(p => h('div', { class: 'rv ' + ROLES[p.role].team + (p.alive ? '' : ' dead') },
       h('b', null, p.seat + '號'), h('span', null, p.name), h('span', { class: 'rr' }, ROLES[p.role].icon + ' ' + ROLES[p.role].name),
@@ -289,7 +289,7 @@ const RULES_HTML = `
 <h4>例外規則（可在設定中調整）</h4>
 <ul>
 <li><b>同守同救</b>：守衛與女巫同時保護被刀的人，預設「奶穿」死亡。</li>
-<li><b>女巫</b>：同一晚只能用一瓶藥；解藥用完後不再得知刀口；自救預設僅限首夜。</li>
+<li><b>女巫</b>：同一晚只能用一瓶藥；解藥用完後不再得知刀口；自救預設僅限首夜。不論藥是否已用完，每晚都會依序詢問解藥與毒藥，避免從流程長短洩漏資訊。</li>
 <li><b>獵人／狼王</b>：被毒死或殉情不能開槍；狼王自爆不能開槍。</li>
 <li><b>白痴</b>：被放逐時自動翻牌免死，之後失去投票權。</li>
 <li><b>遺言</b>：首夜死亡、白天被放逐或被開槍帶走的玩家有遺言；第二夜起的夜晚死亡、自爆、決鬥死亡沒有遺言。</li>

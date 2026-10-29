@@ -147,6 +147,20 @@ class SingleIO {
     return a.sel || [];
   }
 
+  // 投票由玩家自行舉手協調，裝置上只記錄結果
+  async decideVote(cands, spec) {
+    const sheriff = spec.title.startsWith('警長');
+    const a = await this.show({
+      title: `🗳️ ${spec.title}`,
+      text: '請大家公開舉手投票，再點選結果：\n・選 1 人：得票最高者' + (sheriff ? '當選' : '出局') +
+        '\n・選 2 人以上：平票，進入 PK\n・都不選：' + (sheriff ? '無人投票' : '無人出局') +
+        (spec.notes.length ? '\n\n' + spec.notes.join('\n') : ''),
+      options: cands.map(id => opt(this.S.players[id])), select: 'many', min: 0,
+      buttons: [{ id: 'ok', label: '確認結果' }],
+    });
+    return a.sel || [];
+  }
+
   async vote(voters, cands, spec) {
     const S = this.S;
     const out = {};

@@ -11,6 +11,7 @@
  *   io.announce(spec)        -> {btn}        公開公告
  *   io.raiseHands(pids, spec)-> [pid]        舉手（上警、退水）
  *   io.vote(voters, cands, spec) -> {voter: target|null}
+ *   io.decideVote(cands, spec) -> [pid]      （選用）不記名，直接給出得票最高者；平票回傳多人
  *   io.speech({speaker, seconds, title, specials}) -> {kind:'done'|'explode'|'duel', pid, target}
  *   io.update()                              刷新公開狀態列
  *   io.gameOver(result)
@@ -761,6 +762,18 @@ async function handleSpecial(S, io, r, inElection) {
 }
 
 async function runVote(S, io, voters, cands, title, useSheriff, curse) {
+  // 單機模式：玩家自行舉手協調，裝置上直接選出結果
+  if (io.decideVote) {
+    const notes = [];
+    if (useSheriff && S.sheriff != null && voters.includes(S.sheriff)) notes.push(`警長 ${S.players[S.sheriff].seat}號 算 1.5 票`);
+    if (curse != null && cands.includes(curse) && S.players[curse].alive) notes.push(`烏鴉詛咒：${S.players[curse].seat}號 額外 +1 票`);
+    const off = alive(S).filter(p => !voters.includes(p.id)).map(p => p.seat + '號');
+    if (off.length) notes.push(`不能投票：${off.join('、')}`);
+    const top = await io.decideVote(cands, { title, notes });
+    S.log.push(`${title}：` + (top.length === 1 ? `${S.players[top[0]].seat}號 得票最高` : top.length ? `${top.map(id => S.players[id].seat).join('、')} 平票` : '無人得票'));
+    S.lastVotes = null;
+    return top;
+  }
   const votes = await io.vote(voters, cands, { title });
   const tally = {}, detail = {}, abstain = [];
   for (const v of voters) {
@@ -888,12 +901,26 @@ async function votePhase(S, io) {
 }
 
 async function detonate(S, io, p) {
+  if (!S.lastVotes) {
+    // 沒有記名投票紀錄（單機模式）：由炸彈人點選投他的玩家
+    const a = await io.ask(p.id, {
+      title: '💣 炸彈人', text: '要引爆嗎？請點選所有投你的玩家，引爆後他們會全部被炸死。',
+      options: alive(S).filter(q => q.id !== p.id).map(q => opt(q)), select: 'many', min: 1,
+      buttons: [{ id: 'boom', label: '引爆！', style: 'danger', needSel: true }, { id: 'no', label: '不引爆', style: 'ghost' }],
+    });
+    if (a.btn !== 'boom' || !(a.sel || []).length) return;
+    return boom(S, io, a.sel);
+  }
   const victims = Object.keys(S.lastVotes || {}).map(Number).filter(v => S.lastVotes[v] === p.id && S.players[v].alive);
   const a = await io.ask(p.id, {
     title: '💣 炸彈人', text: victims.length ? `要引爆嗎？投你的玩家：${victims.map(v => S.players[v].seat + '號').join('、')} 會全部被炸死。` : '沒有人投你，引爆不會炸到任何人。',
     buttons: [{ id: 'boom', label: '引爆！', style: 'danger', disabled: !victims.length }, { id: 'no', label: '不引爆', style: 'ghost' }],
   });
   if (a.btn !== 'boom') return;
+  return boom(S, io, victims);
+}
+
+async function boom(S, io, victims) {
   const d = [];
   for (const v of victims) d.push(...applyDeath(S, S.players[v], 'bomb'));
   io.update();

@@ -213,10 +213,22 @@ class SingleIO {
 
   async revealRoles() {
     const S = this.S;
-    await this.show({ title: '🎴 發身分', text: '請依座位順序輪流拿起裝置查看自己的身分，看完後隱藏並傳給下一位。', buttons: [{ id: 'ok', label: '開始' }] });
-    for (const p of S.players) {
-      await this.show({ title: '🎴 發身分', big: `請 ${lbl(p)} 拿起裝置`, text: '其他玩家請勿觀看', buttons: [{ id: 'ok', label: `我是 ${p.seat}號，查看身分` }] });
+    // 不必照順序：每位玩家自己點自己的號碼查看
+    const seen = new Set();
+    for (;;) {
+      const left = S.players.filter(p => !seen.has(p.id)).length;
+      const a = await this.show({
+        title: '🎴 查看身分', text: left ? `請點選自己的號碼查看身分，看完後隱藏並把裝置放回中間。\n還有 ${left} 人沒看。` : '所有人都看過身分了。',
+        options: S.players.map(p => opt(p)), select: 'one',
+        marks: Object.fromEntries([...seen].map(id => [id, ['已看']])),
+        buttons: [{ id: 'ok', label: '查看身分', needSel: true }, { id: 'done', label: '全部看完，進入黑夜', disabled: left > 0 }],
+      });
+      if (a.btn === 'done') break;
+      const p = S.players[a.sel];
+      const b = await this.show({ title: '🎴 查看身分', big: `請 ${lbl(p)} 拿起裝置`, text: '其他玩家請勿觀看', buttons: [{ id: 'ok', label: `我是 ${p.seat}號，查看身分` }, { id: 'back', label: '選錯了，返回', style: 'ghost' }] });
+      if (b.btn === 'back') continue;
       await this.show({ who: lbl(p), roleCard: p.role, text: notesOf(p).join('\n'), buttons: [{ id: 'ok', label: '記住了，隱藏' }] });
+      seen.add(p.id);
     }
     await this.show({ title: '✅ 身分發放完畢', text: '請把裝置放在桌子中央，準備進入第一夜。\n記得把音量開大！', buttons: [{ id: 'ok', label: '進入黑夜' }] });
   }

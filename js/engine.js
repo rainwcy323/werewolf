@@ -567,8 +567,11 @@ async function dayPhase(S, io, nightRes) {
   const bear = findRole(S, 'bear');
   if (bear && bear.alive) {
     const roar = neighbors(S, bear.id).some(id => { const q = S.players[id]; return isWolf(q) && q.role !== 'hiddenwolf'; });
-    extra.push(roar ? '🐻 熊咆哮了！' : '🐻 熊很安靜。');
+    extra.push(roar ? '🐻 熊咆哮了！' : '🐻 熊沒有咆哮。');
     S.log.push('熊' + (roar ? '咆哮' : '沒有咆哮'));
+  } else if (bear) {
+    // 訓熊師已死：依設定決定是否讓大家知道
+    extra.push(S.settings.bearDead === 'gone' ? '🐻 熊不再咆哮了（訓熊師已死亡）。' : '🐻 熊沒有咆哮。');
   }
   if (S.silenced != null && S.players[S.silenced].alive) extra.push(`🤐 ${S.players[S.silenced].seat}號 被禁言，今天不能發言。`);
   await io.announce({
@@ -654,16 +657,19 @@ async function afterDeaths(S, io, list, lastWords) {
 async function deathSkill(S, io, p) {
   if (p.cause === 'explode') return;
   const shooter = p.role === 'hunter' || p.role === 'wolfking';
-  const canShoot = shooter && !['poison', 'love', 'reflect'].includes(p.cause) && !p.noShoot;
+  // 沒有死亡技能的角色不需要確認
+  if (!shooter) return;
+  const canShoot = !['poison', 'love', 'reflect'].includes(p.cause) && !p.noShoot;
   if (!canShoot) {
-    const msg = !shooter ? '你沒有可發動的死亡技能。'
-      : p.cause === 'poison' ? '你被女巫毒殺，無法開槍。'
+    // 無法開槍的原因要私下告知，避免公開被毒等資訊
+    const msg = p.cause === 'poison' ? '你被女巫毒殺，無法開槍。'
       : p.cause === 'love' ? '你因殉情死亡，無法開槍。' : '你今晚的技能被封印，無法開槍。';
     await io.ask(p.id, { private: true, title: '☠️ 死亡技能確認', text: msg, buttons: ok() });
     return;
   }
+  // 開槍本來就會公開身分，直接在公共畫面操作
   const a = await io.ask(p.id, {
-    private: true, title: `${R(p).icon} ${R(p).name}・可以開槍`,
+    title: `${R(p).icon} ${lbl(p)}（${R(p).name}）・可以開槍`,
     text: '你可以開槍帶走一名玩家（會公開你的身分），也可以選擇不開槍。',
     options: alive(S).map(q => opt(q)), select: 'one',
     buttons: [{ id: 'shoot', label: '開槍', style: 'danger', needSel: true }, { id: 'no', label: '不開槍', style: 'ghost' }],
@@ -741,6 +747,7 @@ async function handleSpecial(S, io, r, inElection) {
       }
     }
     await afterDeaths(S, io, d, false);
+    await io.announce({ title: '🌙 白天結束', big: '狼人自爆，即將進入黑夜', text: '準備好後按下「進入黑夜」。', buttons: [{ id: 'ok', label: '進入黑夜' }] });
     return true;
   }
   if (r.kind === 'duel') {

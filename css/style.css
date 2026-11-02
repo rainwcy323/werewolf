@@ -200,3 +200,4 @@ h3 { font-size: 1.05rem; color: var(--muted); }
 
 .rules { background: var(--panel); border-radius: var(--radius); padding: 4px 16px; }
 .rules li { margin: 4px 0; }
+.voice { display: flex; flex-direction: column; gap: 8px; }

@@ -1,21 +1,21 @@
 'use strict';
 
 /*
- * 多機模式：一台裝置當主機（持有完整遊戲狀態並執行引擎），其他裝置透過 PeerJS（WebRTC）連線。
+ * 多機模式：一台裝置當主機（持有完整遊戲狀態並執行引擎），其他裝置透過 net.js 的加密轉送連線。
  * 每位玩家只會收到屬於自己的畫面（view），看不到別人的身分。
  */
 
-const PEER_PREFIX = 'wwk-tw-';
-const PEERJS_URL = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
 const QR_URL = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
 
+const scriptLoads = {};
 function loadScript(src) {
-  return new Promise((res, rej) => {
-    if (document.querySelector(`script[src="${src}"]`)) return res();
+  // 同一支程式只載入一次，同時呼叫的人都等同一個載入完成
+  if (!scriptLoads[src]) scriptLoads[src] = new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = src; s.onload = res; s.onerror = () => rej(new Error('無法載入 ' + src));
+    s.src = src; s.onload = res; s.onerror = () => { delete scriptLoads[src]; s.remove(); rej(new Error('無法載入 ' + src)); };
     document.head.append(s);
   });
+  return scriptLoads[src];
 }
 
 function randomCode() {
@@ -135,16 +135,12 @@ class Host {
   }
 
   async open() {
-    await loadScript(PEERJS_URL);
     for (let tries = 0; tries < 5; tries++) {
       const code = randomCode();
+      const relay = new RelayHost(code);
       try {
-        await new Promise((res, rej) => {
-          const peer = new Peer(PEER_PREFIX + code);
-          const t = setTimeout(() => { peer.destroy(); rej(new Error('連線逾時')); }, 15000);
-          peer.on('open', () => { clearTimeout(t); this.peer = peer; this.code = code; res(); });
-          peer.on('error', e => { clearTimeout(t); if (!this.peer) { peer.destroy(); rej(e); } else console.warn(e); });
-        });
+        await relay.open();
+        this.peer = relay; this.code = code;
         break;
       } catch (e) {
         if (e.type !== 'unavailable-id' || tries === 4) throw e;
@@ -154,7 +150,6 @@ class Host {
       conn.on('data', m => this.onMsg(conn, m));
       conn.on('close', () => { if (conn.member && conn.member.conn === conn) { conn.member.online = false; this.refresh(); } });
     });
-    this.peer.on('disconnected', () => { try { this.peer.reconnect(); } catch (e) { /* ignore */ } });
     window.addEventListener('beforeunload', e => { if (this.S && this.S.phase !== 'over') { e.preventDefault(); e.returnValue = ''; } });
   }
 
@@ -515,50 +510,21 @@ class Client {
   }
 
   async connect() {
-    await loadScript(PEERJS_URL);
+    const net = new RelayClient(this.code);
+    this.net = net;
+    net.on('rehello', () => net.send({ t: 'hello', token: this.token, name: this.name }));
+    net.on('data', m => this.onMsg(m));
+    net.on('status', (ok, why) => this.setBanner(ok ? null : why === 'closed' ? '⚠️ 主機已關閉房間' : '⚠️ 與主機的連線中斷，重新連線中…'));
+    await net.connect();
+    // 等主機回應（大廳或遊戲畫面）才算加入成功
     await new Promise((res, rej) => {
-      this.peer = new Peer();
-      const t = setTimeout(() => rej(new Error('連線逾時')), 15000);
-      this.peer.on('open', () => {
-        this.openConn(() => { clearTimeout(t); res(); }, e => { clearTimeout(t); rej(e); });
-      });
-      this.peer.on('error', e => {
-        if (e.type === 'peer-unavailable') { clearTimeout(t); if (!this.everConnected) rej(new Error('找不到此房號，請確認主機已建立房間')); else this.retry(); }
-        else if (!this.everConnected) { clearTimeout(t); rej(e); }
-      });
-      this.peer.on('disconnected', () => { if (!this.closed) setTimeout(() => { try { this.peer.reconnect(); } catch (e) { /* ignore */ } }, 1000); });
-    });
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && !this.closed && (!this.conn || !this.conn.open)) this.retry();
+      if (net.connected) return res();
+      const t = setTimeout(() => { net.destroy(); rej(new Error('主機沒有回應，請確認主機畫面仍開著')); }, 15000);
+      net.on('status', ok => { if (ok) { clearTimeout(t); res(); } });
     });
   }
 
-  openConn(ok, fail) {
-    const conn = this.peer.connect(PEER_PREFIX + this.code, { reliable: true });
-    this.conn = conn;
-    conn.on('open', () => {
-      this.everConnected = true;
-      this.setBanner(null);
-      conn.send({ t: 'hello', token: this.token, name: this.name });
-      if (ok) ok();
-    });
-    conn.on('data', m => this.onMsg(m));
-    conn.on('close', () => { if (!this.closed && conn === this.conn) this.retry(); });
-    conn.on('error', e => { if (fail && !this.everConnected) fail(e); });
-  }
-
-  retry() {
-    if (this.retrying || this.closed) return;
-    this.retrying = true;
-    this.setBanner('⚠️ 與主機的連線中斷，重新連線中…');
-    setTimeout(() => {
-      this.retrying = false;
-      if (this.closed) return;
-      if (this.peer.disconnected) try { this.peer.reconnect(); } catch (e) { /* ignore */ }
-      this.openConn(null, null);
-      setTimeout(() => { if (!this.conn.open) this.retry(); }, 4000);
-    }, 1500);
-  }
+  leave() { this.closed = true; this.net.destroy(); home(); }
 
   setBanner(text) {
     let b = document.getElementById('netbanner');
@@ -572,7 +538,7 @@ class Client {
     const app = $app();
     if (m.t === 'reject') {
       this.closed = true;
-      try { this.peer.destroy(); } catch (e) { /* ignore */ }
+      this.net.destroy();
       app.replaceChildren(h('div', { class: 'page' }, h('h2', null, '無法加入'), h('p', null, m.reason), h('button', { class: 'btn primary', onclick: home }, '回首頁')));
       return;
     }
@@ -588,7 +554,7 @@ class Client {
         h('div', { class: 'members' }, m.players.map(p => h('div', { class: 'mem' + (p.online ? '' : ' off') + (me && p.seat === me.seat ? ' me' : '') },
           h('b', null, p.seat + '號'), h('span', null, p.name)))),
         h('p', { class: 'hint' }, '本局角色：' + m.roles),
-        h('button', { class: 'btn ghost', onclick: () => { this.closed = true; try { this.peer.destroy(); } catch (e) { /* ignore */ } home(); } }, '離開房間')));
+        h('button', { class: 'btn ghost', onclick: () => this.leave() }, '離開房間')));
       return;
     }
     if (m.t === 'view') {
@@ -596,14 +562,14 @@ class Client {
       if (key === this.lastKey) return;
       this.lastKey = key;
       if (!document.body.dataset.playing) { document.body.dataset.playing = '1'; keepAwake(); }
-      const send = o => { if (this.conn && this.conn.open) this.conn.send(o); };
+      const send = o => this.net.send(o);
       app.replaceChildren(renderGameView(localizeView(m.view), {
         control: false,
         onAnswer: (id, ans) => send({ t: 'answer', id, ans }),
         onLive: (id, sel) => send({ t: 'live', id, sel }),
         onAction: (a, data) => send({ t: 'action', id: a.id, ctx: a.ctx, data }),
         onCtrl: () => {},
-        finalButtons: [h('button', { class: 'btn ghost', onclick: () => { this.closed = true; try { this.peer.destroy(); } catch (e) { /* ignore */ } home(); } }, '離開')],
+        finalButtons: [h('button', { class: 'btn ghost', onclick: () => this.leave() }, '離開')],
       }));
     }
   }

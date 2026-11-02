@@ -24,16 +24,34 @@ const $app = () => document.getElementById('app');
 const Narrator = {
   enabled: true,
   voice: null,
+  rate: 0.95,
+  // 中文語音依清晰度排序：神經網路語音（Natural/Online/Neural）> Google > 加強版 > 其他
+  rank(v) {
+    const n = v.name, l = v.lang.replace('_', '-');
+    let s = /zh-TW/i.test(l) ? 30 : /cmn|zh-CN/i.test(l) ? 20 : /zh-HK|yue/i.test(l) ? 5 : 10;
+    if (/Natural|Neural|Online/i.test(n)) s += 100;
+    else if (/Google/i.test(n)) s += 60;
+    else if (/Premium|Enhanced|高音質|優化/i.test(n)) s += 50;
+    if (/HsiaoChen|Hsiao-Chen|曉臻|HsiaoYu|曉雨|Meijia|美佳/i.test(n)) s += 8;
+    return s;
+  },
+  voices() {
+    if (!('speechSynthesis' in window)) return [];
+    return speechSynthesis.getVoices().filter(v => /^(zh|cmn|yue)/i.test(v.lang)).sort((a, b) => this.rank(b) - this.rank(a));
+  },
   init() {
     if (!('speechSynthesis' in window)) return;
     const pick = () => {
-      const vs = speechSynthesis.getVoices();
-      this.voice = vs.find(v => /zh[-_]TW/i.test(v.lang)) || vs.find(v => /zh[-_]HK/i.test(v.lang))
-        || vs.find(v => /^zh/i.test(v.lang)) || null;
+      const vs = this.voices();
+      const want = loadJSON('ww.voice', null);
+      this.voice = (want && vs.find(v => v.voiceURI === want)) || vs[0] || null;
     };
+    this.rate = loadJSON('ww.rate', 0.95);
     pick();
     speechSynthesis.addEventListener('voiceschanged', pick);
   },
+  setVoice(uri) { saveJSON('ww.voice', uri); this.voice = this.voices().find(v => v.voiceURI === uri) || this.voice; },
+  setRate(r) { saveJSON('ww.rate', r); this.rate = r; },
   // iOS 需在使用者點擊時先播一次才能解鎖語音
   unlock() {
     if (!('speechSynthesis' in window)) return;
@@ -51,7 +69,7 @@ const Narrator = {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = this.voice ? this.voice.lang : 'zh-TW';
       if (this.voice) u.voice = this.voice;
-      u.rate = 0.95;
+      u.rate = this.rate;
       u.onend = () => setTimeout(fin, 500);
       u.onerror = fin;
       speechSynthesis.speak(u);
@@ -226,6 +244,27 @@ function gameOverScreen(S, result, buttons) {
 
 /* ───────────── 設定（板子＋規則） ───────────── */
 
+// 語音選擇（存在這台裝置上，不屬於遊戲設定）
+function voicePicker() {
+  const box = h('div', { class: 'voice' });
+  const draw = () => {
+    const vs = Narrator.voices();
+    if (!vs.length) { box.replaceChildren(h('p', { class: 'hint' }, '這台裝置沒有中文語音，播報時只會顯示文字。')); return; }
+    box.replaceChildren(
+      h('label', { class: 'set' }, h('span', null, '播報聲音'),
+        h('select', { onchange: e => Narrator.setVoice(e.target.value) },
+          vs.map((v, i) => h('option', { value: v.voiceURI, selected: !!Narrator.voice && v.voiceURI === Narrator.voice.voiceURI },
+            v.name + (i === 0 ? '（推薦）' : ''))))),
+      h('div', { class: 'set' }, h('span', null, '語速'),
+        h('select', { onchange: e => Narrator.setRate(+e.target.value) },
+          [[0.8, '慢'], [0.9, '稍慢'], [0.95, '標準'], [1.05, '稍快']].map(([v, t]) => h('option', { value: v, selected: Narrator.rate === v }, t))),
+        h('button', { class: 'btn ghost small', onclick: () => { Narrator.unlock(); Narrator.speak('天黑請閉眼，預言家請睜眼'); } }, '🔊 試聽')));
+  };
+  draw();
+  if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', draw, { once: true });
+  return box;
+}
+
 function setupEditor(state, onChange) {
   // state: { n, counts, settings }
   const wrap = h('div', { class: 'setup' });
@@ -273,7 +312,9 @@ function setupEditor(state, onChange) {
       sel('同守同救', 'guardSave', [['die', '死亡（奶穿）'], ['live', '存活']]),
       sel('發言時間', 'speechSec', [[60, '60 秒'], [90, '90 秒'], [120, '120 秒'], [180, '180 秒']]),
       sel('遺言時間', 'lastWordSec', [[30, '30 秒'], [60, '60 秒'], [90, '90 秒']]),
-      sel('語音播報', 'narration', [[true, '開啟'], [false, '關閉（只顯示文字）']]));
+      state.counts.bear ? sel('訓熊師死後', 'bearDead', [['quiet', '公布「熊沒有咆哮」（不透露死亡）'], ['gone', '公布「熊不再咆哮」（直接得知死亡）']]) : null,
+      sel('語音播報', 'narration', [[true, '開啟'], [false, '關閉（只顯示文字）']]),
+      voicePicker());
     wrap.dataset.ok = ok ? '1' : '';
   };
   draw();
@@ -296,7 +337,7 @@ const RULES_HTML = `
 <a href="https://andyventure.com/boardgame-langrensha/" target="_blank" rel="noopener">安迪冒險的狼人殺教學</a>，並補上常見例外規則。</p>
 <h4>流程</h4>
 <ol>
-<li><b>發身分</b>：每位玩家私下查看自己的角色。</li>
+<li><b>發身分</b>：每位玩家私下查看自己的角色。單機模式不必照順序，各自點自己的號碼查看，全部看完才能進入黑夜。</li>
 <li><b>夜晚</b>（依序，只會叫本局有的角色）：夢魘 → 占卜師 → 盜賊（首夜）→ 丘比特（首夜）→ 情侶確認（首夜）→ 野孩子（首夜）→ 守衛 → 魔術師 → 狼人 → 狼美人 → 隱狼（首夜）→ 石像鬼 → 女巫 → 預言家 → 守墓人（第二夜起）→ 禁言長老 → 攝夢人 → 獵魔人（第二夜起）→ 烏鴉。已死亡的角色仍會被「點名」並假等待數秒，避免洩漏資訊。</li>
 <li><b>白天</b>：首日競選警長 → 公布昨晚死亡（含熊是否咆哮、誰被禁言）→ 死亡技能／遺言 → 依序發言 → 放逐投票 → 進入黑夜。單機模式的投票由大家公開舉手，裝置上只點選結果（得票最高者、平票者或無人）；多機模式則每人在自己手機上投票。</li>
 </ol>
@@ -316,7 +357,8 @@ const RULES_HTML = `
 <ul>
 <li><b>同守同救</b>：守衛與女巫同時保護被刀的人，預設「奶穿」死亡。</li>
 <li><b>女巫</b>：同一晚只能用一瓶藥；解藥用完後不再得知刀口；自救預設僅限首夜。不論藥是否已用完，每晚都會依序詢問解藥與毒藥，避免從流程長短洩漏資訊。</li>
-<li><b>獵人／狼王</b>：被毒死或殉情不能開槍；狼王自爆不能開槍。</li>
+<li><b>獵人／狼王</b>：被毒死或殉情不能開槍；狼王自爆不能開槍。可以開槍時直接在公共畫面操作；無法開槍的原因會用私人畫面告知本人。其他角色死亡時不需要拿起裝置確認。</li>
+<li><b>自爆</b>：狼人自爆後白天立即結束，處理完死亡後會先出現「進入黑夜」確認畫面。</li>
 <li><b>白痴</b>：被放逐時自動翻牌免死，之後失去投票權。</li>
 <li><b>遺言</b>：首夜死亡、白天被放逐或被開槍帶走的玩家有遺言；第二夜起的夜晚死亡、自爆、決鬥死亡沒有遺言。</li>
 <li><b>平票</b>：平票玩家 PK 發言，其餘玩家重投；再平票則當天無人出局（警長選舉則警徽流失）。</li>
@@ -327,11 +369,11 @@ const RULES_HTML = `
 <ul>
 <li>裝置放在桌子中央，夜晚聽語音指示：被點名的角色睜眼操作，其他人閉眼。建議將音量開大。</li>
 <li>「狼人自爆」「騎士決鬥」按鈕是公開操作，請由本人在大家面前按下，不要拿來試探別人的身分。</li>
-<li>標示 🔒 的私人畫面（例如死亡技能確認）會先請指定玩家拿起裝置，其他人請勿偷看。</li>
+<li>標示 🔒 的私人畫面（例如獵人被毒無法開槍的通知）會先請指定玩家拿起裝置，其他人請勿偷看。</li>
 </ul>
 <h4>多機模式小提醒</h4>
 <ul>
 <li>一台裝置建立房間（主機），其他人輸入房號或掃描 QR Code 加入；主機需保持畫面開啟、不要關閉分頁。</li>
-<li>主機可以同時當玩家，或只當公共螢幕／播報器。所有裝置需能連上網路（用來建立點對點連線）。</li>
+<li>主機可以同時當玩家，或只當公共螢幕／播報器。所有裝置需能連上網路（Wi‑Fi 或行動網路都可以，不必同一個網路）。訊息透過公用伺服器轉送，並以端對端加密保護。</li>
 <li>斷線時重新整理頁面，會自動以同一身分回到遊戲。</li>
 </ul>`;

@@ -43,7 +43,7 @@ const ROLES = {
   knight:     { name: '騎士', team: 'good', cat: 'god', group: 'god', icon: '⚔️', max: 1,
     desc: '白天發言階段可翻牌與一名玩家決鬥（限一次）：對方是狼人則狼人死亡並立即進入黑夜；對方是好人則騎士以死謝罪。' },
   bear:       { name: '訓熊師', team: 'good', cat: 'god', group: 'god', icon: '🐻', max: 1,
-    desc: '每天早上公布死訊後，若訓熊師左右兩側最近的存活玩家中有狼人，熊會咆哮（隱狼不會被感應）。訓熊師死亡後熊不再出聲。' },
+    desc: '每天早上公布死訊後，若訓熊師左右兩側最近的存活玩家中有狼人，熊會咆哮（隱狼不會被感應）。訓熊師死亡後，可在設定選擇公布「熊沒有咆哮」（大家無法得知訓熊師是否死亡）或「熊不再咆哮」（直接公開訓熊師已死）。' },
   silencer:   { name: '禁言長老', team: 'good', cat: 'god', group: 'god', icon: '🤐', max: 1,
     desc: '每晚禁言一名玩家，該玩家隔天白天不能發言（遺言除外，仍可投票）。不能連續兩晚禁言同一人。' },
   dreamweaver:{ name: '攝夢人', team: 'good', cat: 'god', group: 'god', icon: '💤', max: 1,
@@ -93,6 +93,7 @@ const DEFAULT_SETTINGS = {
   speechSec: 90,
   lastWordSec: 60,
   narration: true,      // 語音播報
+  bearDead: 'quiet',    // 訓熊師死後的公布：quiet（熊沒有咆哮，不透露死亡）/ gone（熊不再咆哮）
 };
 
 // 'werewolf*3 seer witch' → { werewolf: 3, seer: 1, witch: 1 }

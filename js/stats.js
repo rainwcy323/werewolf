@@ -7,7 +7,7 @@
  *   players/<帳號> = { acc, name, games, wins, wolf:{g,w}, good:{g,w}, third:{g,w}, recent:[…], updated }
  */
 
-const STATS_DB = ''; // 例：https://xxxx-default-rtdb.asia-southeast1.firebasedatabase.app
+const STATS_DB = 'https://werewolf-stats-default-rtdb.asia-southeast1.firebasedatabase.app';
 const RECENT_MAX = 20;
 
 const Stats = {

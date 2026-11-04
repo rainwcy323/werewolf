@@ -93,20 +93,46 @@ function viewKey(view) {
 
 let currentHost = null;
 
+
+// 帳號欄位（選填）：輸入後顯示是否為新玩家，並帶入上次的暱稱
+function accountField(saved, nameInput) {
+  const acc = h('input', { value: saved || '', placeholder: '選填，只能用英文字母與數字', maxlength: 20, autocapitalize: 'off', autocomplete: 'off',
+    oninput: e => { e.target.value = e.target.value.replace(/[^A-Za-z0-9]/g, ''); info.textContent = ''; },
+    onchange: () => check() });
+  const info = h('p', { class: 'hint' });
+  const check = async () => {
+    const a = Stats.normAcc(acc.value);
+    if (!a) { info.textContent = '不輸入帳號也能玩，但不會記錄戰績。'; info.className = 'hint'; return; }
+    if (!Stats.enabled) { info.textContent = '戰績資料庫尚未設定，這次不會記錄戰績。'; info.className = 'hint bad'; return; }
+    try {
+      const d = await Stats.get(a);
+      if (Stats.normAcc(acc.value) !== a) return;
+      if (d) {
+        info.textContent = `歡迎回來！已玩 ${d.games} 局，勝率 ${pct(d.wins, d.games)}。`;
+        if (!nameInput.value.trim() && d.name) nameInput.value = d.name;
+      } else info.textContent = '新帳號：遊戲結束後會建立你的戰績。';
+      info.className = 'hint okc';
+    } catch (e) { info.textContent = '無法讀取戰績：' + e.message; info.className = 'hint bad'; }
+  };
+  check();
+  return { acc, info, value: () => Stats.normAcc(acc.value) };
+}
+
 function hostSetup() {
   const saved = loadJSON('ww.host', {});
   const app = $app();
   app.innerHTML = '';
-  const name = h('input', { value: saved.name || '', placeholder: '你的名字', maxlength: 8 });
+  const name = h('input', { value: saved.name || '', placeholder: '本次遊玩的暱稱', maxlength: 8 });
+  const af = accountField(saved.acc, name);
   const plays = h('input', { type: 'checkbox', checked: saved.plays !== false });
   const err = h('p', { class: 'hint bad' });
   const go = h('button', { class: 'btn primary wide', onclick: async () => {
-    if (plays.checked && !name.value.trim()) { err.textContent = '請輸入名字'; return; }
-    saveJSON('ww.host', { name: name.value.trim(), plays: plays.checked });
+    if (plays.checked && !name.value.trim()) { err.textContent = '請輸入暱稱'; return; }
+    saveJSON('ww.host', { name: name.value.trim(), plays: plays.checked, acc: af.value() });
     go.disabled = true; go.textContent = '建立中…';
     Narrator.unlock();
     try {
-      const host = new Host(plays.checked ? name.value.trim() : null);
+      const host = new Host(plays.checked ? name.value.trim() : null, plays.checked ? af.value() : '');
       await host.open();
       currentHost = host;
       host.drawLobby();
@@ -118,15 +144,16 @@ function hostSetup() {
   app.append(h('div', { class: 'page' },
     h('div', { class: 'row between' }, h('h2', null, '📡 建立房間'), h('button', { class: 'btn ghost small', onclick: home }, '返回')),
     h('p', { class: 'hint' }, '此裝置將成為主機：負責執行遊戲、語音播報，並需要一直保持畫面開啟。'),
-    h('label', { class: 'nm' }, h('span', null, '名字'), name),
+    h('label', { class: 'nm' }, h('span', null, '帳號'), af.acc), af.info,
+    h('label', { class: 'nm' }, h('span', null, '暱稱'), name),
     h('label', { class: 'chk' }, plays, h('span', null, '我也參與遊戲（取消勾選＝此裝置只當公共螢幕／播報器）')),
     err, go));
 }
 
 class Host {
-  constructor(hostName) {
+  constructor(hostName, hostAcc) {
     this.hostName = hostName;
-    this.members = hostName ? [{ token: 'host', name: hostName, conn: null, online: true, local: true }] : [];
+    this.members = hostName ? [{ token: 'host', name: hostName, acc: hostAcc || '', conn: null, online: true, local: true }] : [];
     const saved = loadJSON('ww.hostcfg', null);
     this.cfg = saved || { counts: presetFor(9), settings: Object.assign({}, DEFAULT_SETTINGS) };
     this.cfg.settings = Object.assign({}, DEFAULT_SETTINGS, this.cfg.settings);
@@ -160,7 +187,10 @@ class Host {
       if (!mem) {
         if (this.S && this.S.phase !== 'over') { conn.send({ t: 'reject', reason: '遊戲已經開始，無法加入' }); return; }
         if (this.members.length >= 18) { conn.send({ t: 'reject', reason: '房間已滿（最多 18 人）' }); return; }
-        mem = { token: m.token, name: String(m.name || '').slice(0, 8) || '玩家', conn: null, online: true };
+        const acc = Stats.normAcc(m.acc);
+        if (acc && !Stats.validAcc(acc)) { conn.send({ t: 'reject', reason: '帳號只能使用英文字母與數字' }); return; }
+        if (acc && this.members.some(x => x.acc === acc)) { conn.send({ t: 'reject', reason: `帳號「${acc}」已經在房間裡了` }); return; }
+        mem = { token: m.token, name: String(m.name || '').slice(0, 8) || '玩家', acc, conn: null, online: true };
         this.members.push(mem);
       }
       if (mem.conn && mem.conn !== conn) try { mem.conn.close(); } catch (e) { /* ignore */ }
@@ -178,7 +208,7 @@ class Host {
   refresh(force) {
     if (this.io) { this.io.push(force); return; }
     if (!this.S) this.drawLobby();
-    const lobby = { t: 'lobby', code: this.code, players: this.members.map((x, i) => ({ seat: i + 1, name: x.name, online: x.online })),
+    const lobby = { t: 'lobby', code: this.code, players: this.members.map((x, i) => ({ seat: i + 1, name: x.name, online: x.online, stats: !!x.acc })),
       roles: roleSummary(this.cfg.counts), host: this.hostName };
     for (const mem of this.members) if (mem.conn && mem.conn.open) mem.conn.send(lobby);
   }
@@ -196,7 +226,7 @@ class Host {
     start.disabled = !canStart();
     const qr = h('div', { class: 'qr' });
     const list = h('div', { class: 'members' }, this.members.map((m, i) => h('div', { class: 'mem' + (m.online ? '' : ' off') },
-      h('b', null, (i + 1) + '號'), h('span', null, m.name + (m.local ? '（主機）' : '') + (m.online ? '' : '（離線）')),
+      h('b', null, (i + 1) + '號'), h('span', null, m.name + (m.local ? '（主機）' : '') + (m.online ? '' : '（離線）') + (m.acc ? ' 📊' : '')),
       h('button', { class: 'step', disabled: i === 0, onclick: () => { this.move(i, -1); } }, '▲'),
       h('button', { class: 'step', disabled: i === this.members.length - 1, onclick: () => { this.move(i, 1); } }, '▼'),
       m.local ? null : h('button', { class: 'step', onclick: () => this.kick(i) }, '✕'))));
@@ -204,7 +234,7 @@ class Host {
       h('div', { class: 'row between' }, h('h2', null, '📡 房間大廳'), h('button', { class: 'btn ghost small', onclick: () => { if (confirm('確定關閉房間？')) { this.peer.destroy(); currentHost = null; home(); } } }, '關閉房間')),
       h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, this.code)),
       qr,
-      h('p', { class: 'hint' }, '其他人打開本網頁 →「加入房間」輸入房號，或掃描 QR Code。'),
+      h('p', { class: 'hint' }, '其他人打開本網頁 →「加入房間」輸入房號，或掃描 QR Code。📊 表示有輸入帳號、會記錄戰績。'),
       h('h3', null, `玩家（${this.members.length} 人，請用 ▲▼ 排成實際座位順序）`),
       list,
       this.members.length < 6 ? h('p', { class: 'hint bad' }, '至少需要 6 名玩家') : null,
@@ -288,7 +318,7 @@ class HostIO {
       me: p ? { seat: p.seat, name: p.name, role: p.role, alive: p.alive, notes: notesOf(p), canVote: p.canVote, converted: p.converted } : null,
       actions: this.actionsFor(pid, isHost),
     };
-    if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log,
+    if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log, statsNote: S.statsNote,
       players: S.players.map(q => ({ seat: q.seat, name: q.name, role: q.role, alive: q.alive, cause: q.cause, lover: q.lover, id: q.id, converted: q.converted, wasThief: q.wasThief })) };
     return v;
   }
@@ -460,10 +490,16 @@ class HostIO {
 
   async revealRoles() {
     const S = this.S;
-    await this.askAll(S.players.map(p => p.id), pid => ({
-      title: '🎴 你的身分', roleCard: S.players[pid].role, text: notesOf(S.players[pid]).join('\n'),
-      buttons: [{ id: 'ok', label: '我已確認身分' }],
-    }), '🎴 等待所有玩家確認身分');
+    const pids = S.players.map(p => p.id);
+    let done = 0;
+    const prog = () => this.setPublic({ title: '🎴 等待所有玩家確認身分', big: `${done} / ${pids.length}`, text: '每個人在自己的手機上查看身分，查看時請遮好螢幕。' });
+    prog();
+    // 先讓玩家自己按下才顯示身分，避免一開始就被旁人看到
+    await Promise.all(pids.map(async pid => {
+      await this.ask(pid, { title: '🎴 遊戲開始', big: '準備查看身分', text: '請確認旁邊的人看不到你的螢幕，再按下「查看我的身分」。', buttons: [{ id: 'ok', label: '👀 查看我的身分' }] }, true);
+      await this.ask(pid, { title: '🎴 你的身分', roleCard: S.players[pid].role, text: notesOf(S.players[pid]).join('\n'), buttons: [{ id: 'ok', label: '我已確認身分' }] }, true);
+      done++; prog(); this.push();
+    }));
     await this.announce({ title: '✅ 身分確認完畢', text: '之後可隨時點上方「🎴 我的身分」查看。\n主機按下開始後進入第一夜。', buttons: [{ id: 'ok', label: '進入黑夜' }] });
   }
 
@@ -471,6 +507,15 @@ class HostIO {
     delete document.body.dataset.playing;
     this.prompts.clear();
     this.push();
+    const accs = this.host.members.map(m => m.acc);
+    if (Stats.enabled && accs.some(Boolean)) {
+      this.S.statsNote = '📊 正在記錄戰績…';
+      this.push();
+      Stats.record(this.S, accs).then(r => {
+        this.S.statsNote = r.fail ? `📊 ${r.ok} 人戰績已記錄，${r.fail} 人記錄失敗` : `📊 已記錄 ${r.ok} 人的戰績`;
+        this.push();
+      });
+    }
     Narrator.speak('遊戲結束，' + RESULT_TEXT[result].title.replace(/^\S+\s/, ''));
   }
 }
@@ -481,15 +526,17 @@ function joinSetup(prefill) {
   const saved = loadJSON('ww.join', {});
   const app = $app();
   const code = h('input', { value: prefill || saved.code || '', placeholder: '4 碼房號', maxlength: 4, class: 'codein', oninput: e => { e.target.value = e.target.value.toUpperCase(); } });
-  const name = h('input', { value: saved.name || '', placeholder: '你的名字', maxlength: 8 });
+  const name = h('input', { value: saved.name || '', placeholder: '本次遊玩的暱稱', maxlength: 8 });
+  const af = accountField(saved.acc, name);
   const err = h('p', { class: 'hint bad' });
   const go = h('button', { class: 'btn primary wide', onclick: async () => {
-    const c = code.value.trim().toUpperCase(), n = name.value.trim();
-    if (c.length !== 4 || !n) { err.textContent = '請輸入 4 碼房號與名字'; return; }
-    saveJSON('ww.join', { code: c, name: n });
+    const c = code.value.trim().toUpperCase(), n = name.value.trim(), a = af.value();
+    if (c.length !== 4 || !n) { err.textContent = '請輸入 4 碼房號與暱稱'; return; }
+    if (a && !Stats.validAcc(a)) { err.textContent = '帳號只能使用英文字母與數字（最多 20 字）'; return; }
+    saveJSON('ww.join', { code: c, name: n, acc: a });
     go.disabled = true; go.textContent = '連線中…';
     try {
-      const cl = new Client(c, n);
+      const cl = new Client(c, n, a);
       await cl.connect();
     } catch (e) {
       err.textContent = '連線失敗：' + e.message;
@@ -499,20 +546,21 @@ function joinSetup(prefill) {
   app.replaceChildren(h('div', { class: 'page' },
     h('div', { class: 'row between' }, h('h2', null, '🙋 加入房間'), h('button', { class: 'btn ghost small', onclick: home }, '返回')),
     h('label', { class: 'nm' }, h('span', null, '房號'), code),
-    h('label', { class: 'nm' }, h('span', null, '名字'), name),
+    h('label', { class: 'nm' }, h('span', null, '帳號'), af.acc), af.info,
+    h('label', { class: 'nm' }, h('span', null, '暱稱'), name),
     err, go));
 }
 
 class Client {
-  constructor(code, name) {
-    this.code = code; this.name = name; this.token = myToken();
+  constructor(code, name, acc) {
+    this.code = code; this.name = name; this.acc = acc || ''; this.token = myToken();
     this.lastKey = null; this.view = null; this.closed = false;
   }
 
   async connect() {
     const net = new RelayClient(this.code);
     this.net = net;
-    net.on('rehello', () => net.send({ t: 'hello', token: this.token, name: this.name }));
+    net.on('rehello', () => net.send({ t: 'hello', token: this.token, name: this.name, acc: this.acc }));
     net.on('data', m => this.onMsg(m));
     net.on('status', (ok, why) => this.setBanner(ok ? null : why === 'closed' ? '⚠️ 主機已關閉房間' : '⚠️ 與主機的連線中斷，重新連線中…'));
     await net.connect();
@@ -552,7 +600,7 @@ class Client {
         h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, m.code)),
         h('p', { class: 'hint' }, '主機會依實際座位排序，請確認你的號碼與座位相符。'),
         h('div', { class: 'members' }, m.players.map(p => h('div', { class: 'mem' + (p.online ? '' : ' off') + (me && p.seat === me.seat ? ' me' : '') },
-          h('b', null, p.seat + '號'), h('span', null, p.name)))),
+          h('b', null, p.seat + '號'), h('span', null, p.name + (p.stats ? ' 📊' : ''))))),
         h('p', { class: 'hint' }, '本局角色：' + m.roles),
         h('button', { class: 'btn ghost', onclick: () => this.leave() }, '離開房間')));
       return;

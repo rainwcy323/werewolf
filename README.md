@@ -17,6 +17,10 @@
 每種人數（6–18 人）都內建 3～13 種建議板子，共 53 種，也可以自行調整。可選警長競選。
 規則參考 <https://andyventure.com/boardgame-langrensha/>、87G 狼人殺板子大全、口袋狼人殺。例外規則（同守同救、女巫自救、屠邊/屠城等）可在開局前設定。
 
+## 戰績
+
+多機模式加入房間時可輸入帳號（選填），遊戲結束時主機把每位玩家的總局數、勝局、各陣營勝率與最近 20 局寫入 Firebase Realtime Database。資料庫網址設定在 `js/stats.js` 的 `STATS_DB`。
+
 ## 本機測試
 
 ```bash
@@ -49,5 +53,6 @@ python -m http.server 8765
 | `js/ui.js` | 畫面元件、語音播報、設定編輯器、規則說明 |
 | `js/single.js` | 單機模式 |
 | `js/net.js` | 多機連線層（MQTT 轉送＋端對端加密） |
+| `js/stats.js` | 戰績（Firebase Realtime Database REST）與戰績頁 |
 | `js/multi.js` | 多機模式（主機／玩家） |
 | `js/app.js` | 首頁與路由 |

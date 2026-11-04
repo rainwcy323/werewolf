@@ -15,6 +15,8 @@ function home() {
       h('b', null, '📡 建立房間（多機）'), h('small', null, '每人用自己的手機，這台當主機')),
     h('button', { class: 'card-btn', onclick: () => joinSetup() },
       h('b', null, '🙋 加入房間'), h('small', null, '輸入房號或掃描主機的 QR Code')),
+    h('button', { class: 'card-btn', onclick: statsPage },
+      h('b', null, '📊 戰績'), h('small', null, '查看每位玩家的勝率與最近戰績')),
     h('button', { class: 'btn ghost', onclick: () => rulesPage(home) }, '📖 規則說明與角色介紹')));
 }
 

@@ -796,12 +796,12 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
   const max = Math.max(0, ...Object.values(tally));
   const top = max > 0 ? Object.keys(tally).filter(k => tally[k] === max).map(Number) : [];
   const lines = Object.keys(tally).sort((a, b) => tally[b] - tally[a])
-    .map(t => `${S.players[t].seat}號：${tally[t]} 票（${detail[t].join('、')}）`);
+    .map(t => `${lbl(S.players[t])}：${tally[t]} 票（${detail[t].join('、')}）`);
   if (abstain.length) lines.push(`棄票：${abstain.join('、')}`);
   S.log.push(`${title}：` + (lines.join('；') || '全員棄票'));
   await io.announce({
     title: `🗳️ ${title}結果`,
-    big: top.length === 1 ? `${S.players[top[0]].seat}號 得票最高` : top.length > 1 ? `${top.map(id => S.players[id].seat + '號').join('、')} 平票` : '全員棄票',
+    big: top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length > 1 ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '全員棄票',
     text: lines.join('\n'), buttons: [{ id: 'ok', label: '繼續' }],
   });
   S.lastVotes = votes;

@@ -202,9 +202,13 @@ function renderStrip(pub, extra) {
   const night = pub.phase === 'night';
   const phase = pub.phase === 'setup' ? '準備中' : pub.phase === 'over' ? '遊戲結束'
     : `第 ${pub.day} ${night ? '夜 🌙' : '天 ☀️'}`;
+  const roster = () => overlay(h('div', null, h('h3', null, '👥 玩家名單'),
+    h('div', { class: 'roster' }, pub.players.map(p => h('div', { class: 'ros' + (p.alive ? '' : ' dead') },
+      h('b', null, p.seat + '號'), h('span', null, p.name || ''),
+      h('small', null, (p.alive ? '' : '出局') + (p.sheriff ? ' 🎖️' : '') + (p.idiot ? ' 🤪' : '') + (p.silenced ? ' 🤐' : '')))))));
   return h('div', { class: 'strip' + (night ? ' night' : '') },
     h('div', { class: 'phase' }, phase, extra || null),
-    h('div', { class: 'seats' }, pub.players.map(p =>
+    h('div', { class: 'seats', onclick: roster, title: '點一下查看玩家暱稱' }, h('span', { class: 'seat who-btn' }, '👥'), pub.players.map(p =>
       h('span', { class: 'seat' + (p.alive ? '' : ' dead'), title: p.name },
         p.seat, p.sheriff ? h('em', null, '🎖️') : null, p.idiot ? h('em', null, '🤪') : null, p.silenced ? h('em', null, '🤐') : null,
         p.role ? h('em', null, ROLES[p.role].icon) : null))));
@@ -237,6 +241,7 @@ function gameOverScreen(S, result, buttons) {
     h('div', { class: 'reveal' }, S.players.map(p => h('div', { class: 'rv ' + team(p) + (p.alive ? '' : ' dead') },
       h('b', null, p.seat + '號'), h('span', null, p.name), h('span', { class: 'rr' }, ROLES[p.role].icon + ' ' + roleName(p)),
       h('small', null, (p.alive ? '存活' : CAUSE[p.cause]) + (p.lover != null ? ' 💞' : '') + (S.sheriff === p.id ? ' 🎖️' : ''))))),
+    S.statsNote ? h('p', { class: 'hint okc' }, S.statsNote) : null,
     h('details', { class: 'log' }, h('summary', null, '上帝視角紀錄'), h('pre', null, S.log.join('\n'))));
   if (buttons) root.append(h('div', { class: 'btns' }, buttons));
   return root;
@@ -374,6 +379,9 @@ const RULES_HTML = `
 <h4>多機模式小提醒</h4>
 <ul>
 <li>一台裝置建立房間（主機），其他人輸入房號或掃描 QR Code 加入；主機需保持畫面開啟、不要關閉分頁。</li>
+<li>主機按下開始後，每位玩家要先在自己手機按「查看我的身分」才會顯示身分，按之前請遮好螢幕。</li>
+<li>遊戲中隨時點上方的號碼列（👥）可以查看每號玩家的暱稱。</li>
+<li><b>戰績</b>：加入房間時輸入帳號（英文字母與數字，選填）就會記錄戰績，沒用過的帳號會自動建立；不輸入則不記錄。遊戲結束時由主機寫入，首頁「📊 戰績」可瀏覽總局數、勝率、狼人／好人勝率與最近 20 局。</li>
 <li>主機可以同時當玩家，或只當公共螢幕／播報器。所有裝置需能連上網路（Wi‑Fi 或行動網路都可以，不必同一個網路）。訊息透過公用伺服器轉送，並以端對端加密保護。</li>
 <li>斷線時重新整理頁面，會自動以同一身分回到遊戲。</li>
 </ul>`;

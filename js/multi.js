@@ -194,7 +194,7 @@ class Host {
         this.members.push(mem);
       }
       if (mem.conn && mem.conn !== conn) try { mem.conn.close(); } catch (e) { /* ignore */ }
-      mem.conn = conn; mem.online = true; conn.member = mem;
+      mem.conn = conn; mem.online = true; conn.member = mem; mem.pubAck = -1;
       if (!this.S && !mem.local) mem.name = String(m.name || mem.name).slice(0, 8);
       this.refresh(true);
       return;
@@ -209,7 +209,7 @@ class Host {
     if (this.io) { this.io.push(force); return; }
     if (!this.S) this.drawLobby();
     const lobby = { t: 'lobby', code: this.code, players: this.members.map((x, i) => ({ seat: i + 1, name: x.name, online: x.online, stats: !!x.acc })),
-      roles: roleSummary(this.cfg.counts), host: this.hostName };
+      roles: roleSummary(this.cfg.counts), counts: this.cfg.counts, host: this.hostName };
     for (const mem of this.members) if (mem.conn && mem.conn.open) mem.conn.send(lobby);
   }
 
@@ -235,6 +235,7 @@ class Host {
       h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, this.code)),
       qr,
       h('p', { class: 'hint' }, '其他人打開本網頁 →「加入房間」輸入房號，或掃描 QR Code。📊 表示有輸入帳號、會記錄戰績。'),
+      h('button', { class: 'btn ghost', onclick: () => rulesOverlay() }, '📖 規則說明與角色介紹'),
       h('h3', null, `玩家（${this.members.length} 人，請用 ▲▼ 排成實際座位順序）`),
       list,
       this.members.length < 6 ? h('p', { class: 'hint bad' }, '至少需要 6 名玩家') : null,
@@ -260,7 +261,7 @@ class Host {
   startGame() {
     selStore.clear();
     this.S = createGame(this.members.map(m => m.name), Object.assign({}, this.cfg.counts), this.cfg.settings);
-    this.members.forEach((m, i) => { m.pid = i; });
+    this.members.forEach((m, i) => { m.pid = i; m.pubAck = -1; });
     Narrator.enabled = this.S.settings.narration;
     document.body.dataset.playing = '1';
     keepAwake();
@@ -318,6 +319,9 @@ class HostIO {
       me: p ? { seat: p.seat, name: p.name, role: p.role, alive: p.alive, notes: notesOf(p), canVote: p.canVote, converted: p.converted } : null,
       actions: this.actionsFor(pid, isHost),
     };
+    // 公開資訊會越來越長，玩家已經有最新版本時就不重送（玩家端會沿用快取）
+    const mem = !isHost && pid != null ? this.host.members[pid] : null;
+    if (mem && mem.pubAck === S.pubLog.length) { delete v.pub.pubLog; v.pub.pubCached = S.pubLog.length; }
     if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log, statsNote: S.statsNote,
       players: S.players.map(q => ({ seat: q.seat, name: q.name, role: q.role, alive: q.alive, cause: q.cause, lover: q.lover, id: q.id, converted: q.converted, wasThief: q.wasThief })) };
     return v;
@@ -343,6 +347,8 @@ class HostIO {
       if (pr && pr.spec.id === m.id && pr.live) pr.live(m.sel);
     } else if (m.t === 'action') {
       this.onAction(pid, m.id, m.data, m.ctx, isHost);
+    } else if (m.t === 'pubAck' && this.host.members[pid]) {
+      this.host.members[pid].pubAck = m.n;
     }
   }
 
@@ -473,9 +479,13 @@ class HostIO {
     const acts = [];
     if (pid === c.speaker) acts.push({ id: 'done', label: '結束發言', style: 'primary' });
     else if (isHost) acts.push({ id: 'skip', label: '⏭ 結束此人發言', style: 'ghost' });
-    if (pid != null && c.specials.explode && c.specials.explode.includes(pid)) acts.push({ id: 'explode', label: '🐺 自爆', style: 'danger', confirm: '確定要自爆嗎？你會死亡，白天立即結束。' });
-    if (pid != null && c.specials.duel && c.specials.duel.includes(pid)) acts.push({ id: 'duel', label: '⚔️ 騎士決鬥', style: 'ghost',
-      pick: { title: '⚔️ 選擇決鬥對象', text: '對方是狼人則狼人死亡；是好人則你死亡。', options: alive(S).filter(q => q.id !== pid).map(q => opt(q)) } });
+    // 為了不讓旁人從按鈕看出身分，所有存活玩家都看得到這兩個按鈕；只有真正能用的角色按下才會生效
+    const me = pid != null ? S.players[pid] : null;
+    if (me && me.alive) {
+      acts.push({ id: 'explode', label: '🐺 自爆', style: 'danger', confirm: '確定要自爆嗎？\n（只有能自爆的狼人按下才有效，其他人按下不會有任何反應）' });
+      if (has(S, 'knight') && !S.knightUsed) acts.push({ id: 'duel', label: '⚔️ 騎士決鬥', style: 'ghost',
+        pick: { title: '⚔️ 選擇決鬥對象', text: '對方是狼人則狼人死亡；是好人則騎士死亡。\n（只有騎士按下才有效，其他人按下不會有任何反應）', options: alive(S).filter(q => q.id !== pid).map(q => opt(q)) } });
+    }
     return acts.map(a => Object.assign(a, { ctx: c.id }));
   }
 
@@ -591,21 +601,32 @@ class Client {
       return;
     }
     if (m.t === 'lobby') {
-      this.lastKey = null;
+      this.lastKey = null; this.pubLog = null; this.pubAcked = null;
       delete document.body.dataset.playing;
       document.body.classList.remove('is-night');
       const me = m.players.find(p => p.name === this.name);
       app.replaceChildren(h('div', { class: 'page' },
         h('h2', null, '🛋️ 等待開始'),
         h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, m.code)),
+        h('div', { class: 'setup' },
+          h('h3', { class: 'big-h' }, `🎴 本局角色（${countRoles(m.counts || {})} 張）`),
+          m.counts ? roleChips(m.counts) : h('p', { class: 'hint' }, m.roles),
+          h('p', { class: 'hint' }, '點角色可查看玩法；主機調整配置時這裡會即時更新。'),
+          h('button', { class: 'btn ghost', onclick: () => rulesOverlay() }, '📖 完整規則說明')),
+        h('h3', null, `玩家（${m.players.length} 人）`),
         h('p', { class: 'hint' }, '主機會依實際座位排序，請確認你的號碼與座位相符。'),
         h('div', { class: 'members' }, m.players.map(p => h('div', { class: 'mem' + (p.online ? '' : ' off') + (me && p.seat === me.seat ? ' me' : '') },
           h('b', null, p.seat + '號'), h('span', null, p.name + (p.stats ? ' 📊' : ''))))),
-        h('p', { class: 'hint' }, '本局角色：' + m.roles),
         h('button', { class: 'btn ghost', onclick: () => this.leave() }, '離開房間')));
       return;
     }
     if (m.t === 'view') {
+      const pub = m.view.pub;
+      if (pub.pubLog) {
+        this.pubLog = pub.pubLog;
+        if (this.pubAcked !== pub.pubLog.length) { this.pubAcked = pub.pubLog.length; this.net.send({ t: 'pubAck', n: this.pubAcked }); }
+      } else if (this.pubLog && this.pubLog.length === pub.pubCached) pub.pubLog = this.pubLog;
+      else { this.pubAcked = null; this.net.send({ t: 'pubAck', n: -1 }); pub.pubLog = this.pubLog || []; }
       const key = viewKey(m.view);
       if (key === this.lastKey) return;
       this.lastKey = key;

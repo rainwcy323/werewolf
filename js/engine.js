@@ -54,7 +54,7 @@ function createGame(names, roleCounts, settings) {
   }));
   const S = {
     players, settings: Object.assign({}, DEFAULT_SETTINGS, settings), roleCounts, extras: deck.slice(n),
-    day: 0, phase: 'setup', sheriff: null, badgeLost: false,
+    day: 0, phase: 'setup', sheriff: null, badgeLost: false, pubLog: [],
     witch: { antidote: true, poison: true }, lastGuard: null, knightUsed: false,
     third: null, log: [], result: null, pending: [], wolvesMet: false,
     charm: null, lastFear: null, lastSilence: null, lastDream: null, silenced: null, curse: null,
@@ -104,7 +104,7 @@ function killers(S) {
 
 function publicView(S) {
   return {
-    day: S.day, phase: S.phase, sheriff: S.sheriff,
+    day: S.day, phase: S.phase, sheriff: S.sheriff, roles: S.roleCounts, pubLog: S.pubLog,
     players: S.players.map(p => ({
       id: p.id, seat: p.seat, name: p.name, alive: p.alive,
       sheriff: S.sheriff === p.id, idiot: p.idiotRevealed, silenced: S.phase === 'day' && S.silenced === p.id,
@@ -161,7 +161,14 @@ function checkWin(S, night) {
   if (w) throw new GameOver(w);
 }
 
+// 白天公開的資訊，玩家可隨時查看
+function addPub(S, spec) {
+  S.pubLog.push({ day: S.day, title: spec.title || '', big: spec.big || '', text: spec.pubText != null ? spec.pubText : (spec.text || '') });
+}
+
 async function runGame(S, io) {
+  const announce = io.announce.bind(io);
+  io.announce = spec => { if (spec.pub) addPub(S, spec); return announce(spec); };
   try {
     io.update();
     await io.revealRoles();
@@ -574,11 +581,12 @@ async function dayPhase(S, io, nightRes) {
     extra.push(S.settings.bearDead === 'gone' ? '🐻 熊不再咆哮了（訓熊師已死亡）。' : '🐻 熊沒有咆哮。');
   }
   if (S.silenced != null && S.players[S.silenced].alive) extra.push(`🤐 ${S.players[S.silenced].seat}號 被禁言，今天不能發言。`);
-  await io.announce({
+  await io.announce({ pub: true,
     title: `☀️ 第 ${S.day} 天`,
-    big: dead.length ? `昨晚死亡：${dead.map(p => p.seat + '號').join('、')}` : '昨晚是平安夜',
+    big: dead.length ? `昨晚死亡：${dead.map(p => lbl(p)).join('、')}` : '昨晚是平安夜',
     tone: dead.length ? 'bad' : 'good',
     text: [dead.length ? (S.day === 1 ? '首夜死亡的玩家可以發表遺言。' : '非首夜死亡沒有遺言。') : ''].concat(extra).filter(Boolean).join('\n'),
+    pubText: extra.join('\n'),
     buttons: [{ id: 'ok', label: '繼續' }],
   });
   checkWin(S, true);
@@ -679,12 +687,12 @@ async function deathSkill(S, io, p) {
   if (q.role === 'thug') {
     q.pendingCause = 'shot'; if (!S.pending.includes(q.id)) S.pending.push(q.id);
     S.log.push(`${lbl(p)} 開槍打中老流氓 ${lbl(q)}，入夜後死亡`);
-    await io.announce({ title: '💥 開槍', big: `${p.seat}號（${R(p).name}）射中了 ${q.seat}號`, text: `${q.seat}號 是老流氓，撐著沒有倒下，將在入夜時死亡。`, buttons: [{ id: 'ok', label: '繼續' }] });
+    await io.announce({ pub: true, title: '💥 開槍', big: `${p.seat}號（${R(p).name}）射中了 ${q.seat}號`, text: `${q.seat}號 是老流氓，撐著沒有倒下，將在入夜時死亡。`, buttons: [{ id: 'ok', label: '繼續' }] });
     return;
   }
   const d = applyDeath(S, q, 'shot');
   io.update();
-  await io.announce({
+  await io.announce({ pub: true,
     title: '💥 開槍', big: `${p.seat}號（${R(p).name}）帶走了 ${q.seat}號`, tone: 'bad',
     text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }],
   });
@@ -699,7 +707,7 @@ async function charmDeath(S, io) {
   if (!c || !c.alive || c.role === 'thug') return [];
   const d = applyDeath(S, c, 'charm');
   io.update();
-  await io.announce({ title: '💃 狼美人的魅惑', big: `${c.seat}號 被魅惑，隨狼美人殉情`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
+  await io.announce({ pub: true, title: '💃 狼美人的魅惑', big: `${c.seat}號 被魅惑，隨狼美人殉情`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
   return d;
 }
 
@@ -711,7 +719,7 @@ async function passBadge(S, io, p) {
   });
   if (a.btn === 'give') S.sheriff = a.sel; else { S.sheriff = null; S.badgeLost = true; }
   io.update();
-  await io.announce({
+  await io.announce({ pub: true,
     title: '🎖️ 警徽', big: a.btn === 'give' ? `警徽移交給 ${S.players[a.sel].seat}號` : '警徽被撕毀',
     buttons: [{ id: 'ok', label: '繼續' }],
   });
@@ -725,7 +733,7 @@ async function handleSpecial(S, io, r, inElection) {
     const blood = p.role === 'bloodmoon';
     if (blood) S.bloodNight = S.day + 1;
     io.update();
-    await io.announce({
+    await io.announce({ pub: true,
       title: '💣 狼人自爆', big: `${p.seat}號 自爆！`, tone: 'bad',
       text: (d.length > 1 ? `${d[1].seat}號 殉情\n` : '') + (inElection ? '警徽流失，' : '') + '白天立即結束。' + (blood ? '\n🌕 血月使徒自爆：今晚所有神職無法使用技能。' : ''),
       buttons: [{ id: 'ok', label: '繼續' }],
@@ -741,7 +749,7 @@ async function handleSpecial(S, io, r, inElection) {
         const q = S.players[a.sel];
         const d2 = applyDeath(S, q, 'whitewolf');
         io.update();
-        await io.announce({ title: '🤍 白狼王', big: `${p.seat}號 白狼王帶走了 ${q.seat}號`, tone: 'bad', text: d2.length > 1 ? `${d2[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
+        await io.announce({ pub: true, title: '🤍 白狼王', big: `${p.seat}號 白狼王帶走了 ${q.seat}號`, tone: 'bad', text: d2.length > 1 ? `${d2[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
         checkWin(S, false);
         await afterDeaths(S, io, d2, false);
       }
@@ -756,7 +764,7 @@ async function handleSpecial(S, io, r, inElection) {
     const wolf = isWolf(t);
     const d = applyDeath(S, wolf ? t : k, 'duel');
     io.update();
-    await io.announce({
+    await io.announce({ pub: true,
       title: '⚔️ 騎士決鬥', big: wolf ? `${t.seat}號 是狼人！` : `${t.seat}號 是好人`, tone: wolf ? 'good' : 'bad',
       text: (wolf ? `${t.seat}號 死亡，白天立即結束。` : `${k.seat}號 騎士以死謝罪，發言繼續。`) + (d.length > 1 ? `\n${d[1].seat}號 殉情` : ''),
       buttons: [{ id: 'ok', label: '繼續' }],
@@ -777,6 +785,7 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
     const off = alive(S).filter(p => !voters.includes(p.id)).map(p => p.seat + '號');
     if (off.length) notes.push(`不能投票：${off.join('、')}`);
     const top = await io.decideVote(cands, { title, notes });
+    addPub(S, { title: `🗳️ ${title}結果`, big: top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '無人得票', text: notes.join('\n') });
     S.log.push(`${title}：` + (top.length === 1 ? `${S.players[top[0]].seat}號 得票最高` : top.length ? `${top.map(id => S.players[id].seat).join('、')} 平票` : '無人得票'));
     S.lastVotes = null;
     return top;
@@ -785,21 +794,28 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
   const tally = {}, detail = {}, abstain = [];
   for (const v of voters) {
     const t = votes[v];
-    if (t == null) { abstain.push(S.players[v].seat); continue; }
-    tally[t] = (tally[t] || 0) + (useSheriff && S.sheriff === v ? 1.5 : 1);
-    (detail[t] = detail[t] || []).push(S.players[v].seat + (useSheriff && S.sheriff === v ? '🎖️' : ''));
+    const q = S.players[v];
+    if (t == null) { abstain.push(lbl(q)); continue; }
+    const sh = useSheriff && S.sheriff === v;
+    tally[t] = (tally[t] || 0) + (sh ? 1.5 : 1);
+    (detail[t] = detail[t] || []).push(lbl(q) + (sh ? ' 🎖️（1.5 票）' : ''));
   }
   if (curse != null && cands.includes(curse) && S.players[curse].alive) {
     tally[curse] = (tally[curse] || 0) + 1;
-    (detail[curse] = detail[curse] || []).push('🐦‍⬛烏鴉');
+    (detail[curse] = detail[curse] || []).push('🐦‍⬛ 烏鴉詛咒（+1 票）');
   }
   const max = Math.max(0, ...Object.values(tally));
   const top = max > 0 ? Object.keys(tally).filter(k => tally[k] === max).map(Number) : [];
-  const lines = Object.keys(tally).sort((a, b) => tally[b] - tally[a])
-    .map(t => `${lbl(S.players[t])}：${tally[t]} 票（${detail[t].join('、')}）`);
-  if (abstain.length) lines.push(`棄票：${abstain.join('、')}`);
-  S.log.push(`${title}：` + (lines.join('；') || '全員棄票'));
-  await io.announce({
+  // 依得票排序，每一票各佔一行：「投票者 → 被投者」
+  const order = Object.keys(tally).sort((a, b) => tally[b] - tally[a]);
+  const lines = [];
+  for (const t of order) {
+    lines.push(`【${lbl(S.players[t])}】${tally[t]} 票`);
+    for (const v of detail[t]) lines.push(`　${v} → ${S.players[t].seat}號`);
+  }
+  if (abstain.length) { lines.push('【棄票】'); for (const v of abstain) lines.push('　' + v); }
+  S.log.push(`${title}：` + (order.map(t => `${S.players[t].seat}號 ${tally[t]} 票（${detail[t].join('、')}）`).concat(abstain.length ? ['棄票：' + abstain.join('、')] : []).join('；') || '全員棄票'));
+  await io.announce({ pub: true,
     title: `🗳️ ${title}結果`,
     big: top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length > 1 ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '全員棄票',
     text: lines.join('\n'), buttons: [{ id: 'ok', label: '繼續' }],
@@ -812,7 +828,7 @@ async function sheriffElection(S, io) {
   const pool = alive(S).map(p => p.id);
   const lost = async msg => {
     S.badgeLost = true;
-    await io.announce({ title: '🎖️ 警長競選', big: msg, buttons: [{ id: 'ok', label: '繼續' }] });
+    await io.announce({ pub: true, title: '🎖️ 警長競選', big: msg, buttons: [{ id: 'ok', label: '繼續' }] });
     return false;
   };
   await io.announce({ title: '🎖️ 警長競選', text: '警長投票時算 1.5 票，並決定發言順序、最後發言。\n警長死亡時可移交或撕毀警徽。', buttons: [{ id: 'ok', label: '開始' }] });
@@ -823,7 +839,7 @@ async function sheriffElection(S, io) {
 
   const start = Math.floor(Math.random() * cands.length);
   const order = cands.slice(start).concat(cands.slice(0, start));
-  await io.announce({ title: '🎖️ 候選人', big: cands.map(id => S.players[id].seat + '號').join('、'), text: '發言順序：' + order.map(id => S.players[id].seat).join(' → '), buttons: [{ id: 'ok', label: '開始競選發言' }] });
+  await io.announce({ pub: true, title: '🎖️ 候選人', big: cands.map(id => S.players[id].seat + '號').join('、'), text: '發言順序：' + order.map(id => S.players[id].seat).join(' → '), buttons: [{ id: 'ok', label: '開始競選發言' }] });
   for (const id of order) {
     const r = await speak(S, io, S.players[id], `${lbl(S.players[id])} 競選發言`, true);
     if (r.kind !== 'done' && await handleSpecial(S, io, r, true)) return true;
@@ -848,7 +864,7 @@ async function sheriffElection(S, io) {
   }
   S.sheriff = cands[0];
   io.update();
-  await io.announce({ title: '🎖️ 警長誕生', big: `${lbl(S.players[S.sheriff])} 當選警長`, tone: 'good', buttons: [{ id: 'ok', label: '公布昨晚結果' }] });
+  await io.announce({ pub: true, title: '🎖️ 警長誕生', big: `${lbl(S.players[S.sheriff])} 當選警長`, tone: 'good', buttons: [{ id: 'ok', label: '公布昨晚結果' }] });
   return false;
 }
 
@@ -870,12 +886,12 @@ async function votePhase(S, io) {
       else top = await runVote(S, io, v, top, 'PK 投票', true);
     }
     if (top.length !== 1) {
-      await io.announce({ title: '⚖️ 平安日', big: '再次平票，今天無人出局', buttons: [{ id: 'ok', label: '進入黑夜' }] });
+      await io.announce({ pub: true, title: '⚖️ 平安日', big: '再次平票，今天無人出局', buttons: [{ id: 'ok', label: '進入黑夜' }] });
       return;
     }
   }
   if (!top.length) {
-    await io.announce({ title: '🗳️ 放逐', big: '今天無人出局', buttons: [{ id: 'ok', label: '進入黑夜' }] });
+    await io.announce({ pub: true, title: '🗳️ 放逐', big: '今天無人出局', buttons: [{ id: 'ok', label: '進入黑夜' }] });
     return;
   }
   const p = S.players[top[0]];
@@ -884,12 +900,12 @@ async function votePhase(S, io) {
     p.idiotRevealed = true; p.canVote = false;
     S.log.push(`${lbl(p)} 白痴翻牌免死`);
     io.update();
-    await io.announce({ title: '🤪 白痴翻牌', big: `${p.seat}號 是白痴！`, text: '免於放逐，但之後失去投票權。', buttons: [{ id: 'ok', label: '進入黑夜' }] });
+    await io.announce({ pub: true, title: '🤪 白痴翻牌', big: `${lbl(p)} 是白痴！`, text: '免於放逐，但之後失去投票權。', buttons: [{ id: 'ok', label: '進入黑夜' }] });
     return;
   }
   const d = applyDeath(S, p, 'vote');
   io.update();
-  await io.announce({ title: '🗳️ 放逐', big: `${p.seat}號 被放逐`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
+  await io.announce({ pub: true, title: '🗳️ 放逐', big: `${lbl(p)} 被放逐`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
 
   // 野孩子的榜樣被放逐 → 轉為狼人（不公開）
   for (const w of S.players) {
@@ -931,7 +947,7 @@ async function boom(S, io, victims) {
   const d = [];
   for (const v of victims) d.push(...applyDeath(S, S.players[v], 'bomb'));
   io.update();
-  await io.announce({ title: '💣 炸彈人引爆', big: `炸死了 ${d.map(q => q.seat + '號').join('、')}`, tone: 'bad', buttons: [{ id: 'ok', label: '繼續' }] });
+  await io.announce({ pub: true, title: '💣 炸彈人引爆', big: `炸死了 ${d.map(q => q.seat + '號').join('、')}`, tone: 'bad', buttons: [{ id: 'ok', label: '繼續' }] });
   if (!alive(S).length) throw new GameOver('bomber');
   checkWin(S, false);
   await afterDeaths(S, io, d, true);
@@ -947,7 +963,7 @@ async function bloodMoonLast(S, io, p) {
   const q = S.players[a.sel];
   const d = applyDeath(S, q, 'bloodmoon');
   io.update();
-  await io.announce({ title: '🌕 血月使徒', big: `${q.seat}號 被帶走`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
+  await io.announce({ pub: true, title: '🌕 血月使徒', big: `${q.seat}號 被帶走`, tone: 'bad', text: d.length > 1 ? `${d[1].seat}號 殉情` : '', buttons: [{ id: 'ok', label: '繼續' }] });
   // 結算以夜晚規則（狼優先）；若人狼戀第三方仍存活則遊戲繼續
   checkWin(S, true);
   return d;

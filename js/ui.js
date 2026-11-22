@@ -206,12 +206,50 @@ function renderStrip(pub, extra) {
     h('div', { class: 'roster' }, pub.players.map(p => h('div', { class: 'ros' + (p.alive ? '' : ' dead') },
       h('b', null, p.seat + '號'), h('span', null, p.name || ''),
       h('small', null, (p.alive ? '' : '出局') + (p.sheriff ? ' 🎖️' : '') + (p.idiot ? ' 🤪' : '') + (p.silenced ? ' 🤐' : '')))))));
+  const info = pub.pubLog ? h('button', { class: 'btn ghost tiny', onclick: () => publicInfoOverlay(pub) }, '📋 公開資訊') : null;
   return h('div', { class: 'strip' + (night ? ' night' : '') },
-    h('div', { class: 'phase' }, phase, extra || null),
+    h('div', { class: 'phase' }, phase, info, extra || null),
     h('div', { class: 'seats', onclick: roster, title: '點一下查看玩家暱稱' }, h('span', { class: 'seat who-btn' }, '👥'), pub.players.map(p =>
       h('span', { class: 'seat' + (p.alive ? '' : ' dead'), title: p.name },
         p.seat, p.sheriff ? h('em', null, '🎖️') : null, p.idiot ? h('em', null, '🤪') : null, p.silenced ? h('em', null, '🤐') : null,
         p.role ? h('em', null, ROLES[p.role].icon) : null))));
+}
+
+// 有標題與關閉鈕的資訊視窗
+function infoOverlay(title, ...content) {
+  let close;
+  const btn = h('button', { class: 'btn ghost small', onclick: () => close() }, '關閉');
+  close = overlay(h('div', null, h('div', { class: 'row between ovhead' }, h('h3', null, title), btn), ...content));
+  return close;
+}
+
+// 本局角色配置：每個角色一張小卡，點一下看玩法
+function roleChips(counts) {
+  return h('div', { class: 'chips' }, ROLE_ORDER.filter(k => counts[k]).map(k => {
+    const r = ROLES[k];
+    return h('button', { class: 'chip ' + r.team, onclick: () => infoOverlay(r.icon + ' ' + r.name, roleCardEl(k)) },
+      h('span', { class: 'ci' }, r.icon), h('span', { class: 'cn' }, r.name), counts[k] > 1 ? h('b', null, '×' + counts[k]) : null);
+  }));
+}
+
+function rulesOverlay() {
+  infoOverlay('📖 規則說明', h('div', { class: 'rules', html: RULES_HTML }), h('h3', null, '角色一覽'), h('div', { class: 'cards' }, ROLE_ORDER.map(k => roleCardEl(k))));
+}
+
+// 公開資訊：角色配置＋每天白天公布的所有事項
+function publicInfoOverlay(pub) {
+  const days = [];
+  for (const e of pub.pubLog || []) {
+    let d = days.find(x => x.day === e.day);
+    if (!d) days.push(d = { day: e.day, items: [] });
+    d.items.push(e);
+  }
+  infoOverlay('📋 公開資訊',
+    h('h4', { class: 'grp' }, `本局角色（${countRoles(pub.roles || {})} 張）`),
+    roleChips(pub.roles || {}),
+    days.length ? days.slice().reverse().map(d => h('div', { class: 'pday' }, h('h4', { class: 'grp' }, `第 ${d.day} 天`),
+      d.items.map(e => h('div', { class: 'pitem' }, h('div', { class: 'pt' }, e.title), e.big ? h('b', null, e.big) : null, e.text ? h('p', { class: 'text' }, e.text) : null))))
+      : h('p', { class: 'hint' }, '還沒有任何白天公布的資訊。'));
 }
 
 function overlay(content, onClose) {
@@ -381,6 +419,8 @@ const RULES_HTML = `
 <li>一台裝置建立房間（主機），其他人輸入房號或掃描 QR Code 加入；主機需保持畫面開啟、不要關閉分頁。</li>
 <li>主機按下開始後，每位玩家要先在自己手機按「查看我的身分」才會顯示身分，按之前請遮好螢幕。</li>
 <li>遊戲中隨時點上方的號碼列（👥）可以查看每號玩家的暱稱。</li>
+<li>點上方「📋 公開資訊」可隨時回顧本局角色配置，以及每天白天公布的所有事項（死訊、熊是否咆哮、禁言、投票明細、開槍、自爆等）。</li>
+<li>發言階段每位存活玩家的手機都有「🐺 自爆」與「⚔️ 騎士決鬥」按鈕，避免旁人從按鈕看出身分；只有真正能自爆的狼人、真正的騎士按下才會生效，其他人按下不會有任何反應。</li>
 <li><b>戰績</b>：加入房間時輸入帳號（英文字母與數字，選填）就會記錄戰績，沒用過的帳號會自動建立；不輸入則不記錄。遊戲結束時由主機寫入，首頁「📊 戰績」可瀏覽總局數、勝率、狼人／好人勝率與最近 20 局。</li>
 <li>主機可以同時當玩家，或只當公共螢幕／播報器。所有裝置需能連上網路（Wi‑Fi 或行動網路都可以，不必同一個網路）。訊息透過公用伺服器轉送，並以端對端加密保護。</li>
 <li>斷線時重新整理頁面，會自動以同一身分回到遊戲。</li>

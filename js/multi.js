@@ -464,9 +464,9 @@ class HostIO {
     return res;
   }
 
-  speech({ speaker, seconds, title, specials }) {
+  speech({ speaker, seconds, title, specials, info }) {
     return new Promise(res => {
-      this.setPublic({ title, who: `🗣️ ${lbl(this.S.players[speaker])}`, timer: { endAt: Date.now() + seconds * 1000 } });
+      this.setPublic({ title, who: `🗣️ ${lbl(this.S.players[speaker])}`, timer: { endAt: Date.now() + seconds * 1000 }, note: info || undefined });
       this.speechCtx = { id: this.screen.id, speaker, specials: specials || {}, res: r => { this.speechCtx = null; res(r); } };
       this.push();
     });

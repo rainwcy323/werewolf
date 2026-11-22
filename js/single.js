@@ -179,7 +179,7 @@ class SingleIO {
     return out;
   }
 
-  async speech({ speaker, seconds, title, specials }) {
+  async speech({ speaker, seconds, title, specials, info }) {
     const S = this.S;
     const endAt = Date.now() + seconds * 1000;
     const sp = specials || {};
@@ -187,7 +187,7 @@ class SingleIO {
       const buttons = [{ id: 'done', label: '結束發言' }];
       if (sp.explode) buttons.push({ id: 'explode', label: '🐺 狼人自爆', style: 'danger' });
       if (sp.duel) buttons.push({ id: 'duel', label: '⚔️ 騎士決鬥', style: 'ghost' });
-      const a = await this.show({ title, who: `🗣️ ${lbl(S.players[speaker])}`, timer: { endAt }, buttons });
+      const a = await this.show({ title, who: `🗣️ ${lbl(S.players[speaker])}`, timer: { endAt }, buttons, note: info || null });
       if (a.btn === 'done') return { kind: 'done' };
       if (a.btn === 'explode') {
         const b = await overlayAsk({ title: '🐺 哪位玩家要自爆？', text: '請自爆的狼人本人點選自己的號碼', options: alive(S).map(q => opt(q)), select: 'one',

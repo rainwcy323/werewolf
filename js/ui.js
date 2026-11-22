@@ -121,6 +121,7 @@ function renderScreen(spec, onAnswer, opts) {
   if (spec.text) root.append(h('p', { class: 'text' }, spec.text));
 
   if (spec.timer) root.append(timerEl(spec.timer));
+  if (spec.note) root.append(h('div', { class: 'note' }, spec.note));
 
   const btnEls = [];
   const refreshBtns = () => btnEls.forEach(([b, el]) => { el.disabled = !!b.disabled || (b.needSel && !valid()); });

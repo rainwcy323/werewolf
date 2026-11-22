@@ -196,7 +196,7 @@ async function step(S, io, role, open, close, act) {
 }
 
 async function nightPhase(S, io) {
-  S.phase = 'night'; io.update();
+  S.phase = 'night'; S.voteInfo = null; io.update();
   const N = { fear: null, bind: null, guard: null, swap: null, wolf: null, save: null, poison: null, check: null, silence: null, dream: null, hunt: null, curse: null };
   const bloodNight = S.bloodNight === S.day;
   S.log.push(`── 第 ${S.day} 夜 ──`);
@@ -658,7 +658,8 @@ async function afterDeaths(S, io, list, lastWords) {
   for (const p of list) {
     await deathSkill(S, io, p);
     if (S.sheriff === p.id) await passBadge(S, io, p);
-    if (lastWords) await io.speech({ speaker: p.id, seconds: S.settings.lastWordSec, title: `${lbl(p)} 遺言` });
+    if (lastWords) await io.speech({ speaker: p.id, seconds: S.settings.lastWordSec, title: `${lbl(p)} 遺言`,
+      info: S.voteInfo && S.voteInfo.length ? S.voteInfo.join('\n\n') : null });
   }
 }
 
@@ -785,7 +786,9 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
     const off = alive(S).filter(p => !voters.includes(p.id)).map(p => p.seat + '號');
     if (off.length) notes.push(`不能投票：${off.join('、')}`);
     const top = await io.decideVote(cands, { title, notes });
-    addPub(S, { title: `🗳️ ${title}結果`, big: top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '無人得票', text: notes.join('\n') });
+    const big = top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '無人得票';
+    addPub(S, { title: `🗳️ ${title}結果`, big, text: notes.join('\n') });
+    if (S.voteInfo) S.voteInfo.push(`🗳️ ${title}：${big}`);
     S.log.push(`${title}：` + (top.length === 1 ? `${S.players[top[0]].seat}號 得票最高` : top.length ? `${top.map(id => S.players[id].seat).join('、')} 平票` : '無人得票'));
     S.lastVotes = null;
     return top;
@@ -815,11 +818,9 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
   }
   if (abstain.length) { lines.push('【棄票】'); for (const v of abstain) lines.push('　' + v); }
   S.log.push(`${title}：` + (order.map(t => `${S.players[t].seat}號 ${tally[t]} 票（${detail[t].join('、')}）`).concat(abstain.length ? ['棄票：' + abstain.join('、')] : []).join('；') || '全員棄票'));
-  await io.announce({ pub: true,
-    title: `🗳️ ${title}結果`,
-    big: top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length > 1 ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '全員棄票',
-    text: lines.join('\n'), buttons: [{ id: 'ok', label: '繼續' }],
-  });
+  const big = top.length === 1 ? `${lbl(S.players[top[0]])} 得票最高` : top.length > 1 ? `${top.map(id => lbl(S.players[id])).join('、')} 平票` : '全員棄票';
+  if (S.voteInfo) S.voteInfo.push(`🗳️ ${title}：${big}\n${lines.join('\n')}`);
+  await io.announce({ pub: true, title: `🗳️ ${title}結果`, big, text: lines.join('\n'), buttons: [{ id: 'ok', label: '繼續' }] });
   S.lastVotes = votes;
   return top;
 }
@@ -871,6 +872,7 @@ async function sheriffElection(S, io) {
 async function votePhase(S, io) {
   const voters = () => alive(S).filter(p => p.canVote).map(p => p.id);
   S.lastExiled = null;
+  S.voteInfo = []; // 今天的放逐投票結果，遺言時繼續顯示
   let top = await runVote(S, io, voters(), alive(S).map(p => p.id), '放逐投票', true, S.curse);
   if (top.length > 1) {
     await io.announce({ title: '⚖️ 平票 PK', text: '平票玩家依序 PK 發言，其餘玩家再投票（PK 台上的玩家不能投票）。', buttons: [{ id: 'ok', label: '開始 PK' }] });

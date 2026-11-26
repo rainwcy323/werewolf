@@ -31,6 +31,23 @@ function myToken() {
 
 function joinUrl(code) { return location.origin + location.pathname + '?room=' + code; }
 
+// 房號＋加入用 QR Code（主機與玩家都能顯示，方便邀請其他人）
+function qrEl(code) {
+  const qr = h('div', { class: 'qr' });
+  if (location.protocol.startsWith('http')) {
+    loadScript(QR_URL).then(() => { try { new QRCode(qr, { text: joinUrl(code), width: 150, height: 150 }); } catch (e) { /* ignore */ } }).catch(() => {});
+  }
+  return qr;
+}
+
+function roomCodeEl(code) {
+  return h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, code));
+}
+
+function roomOverlay(code) {
+  infoOverlay('🔗 房號', roomCodeEl(code), qrEl(code), h('p', { class: 'hint' }, '其他人打開本網頁 →「加入房間」輸入房號，或掃描 QR Code。'));
+}
+
 /* ───────────── 共用：渲染玩家畫面 ───────────── */
 
 function renderGameView(view, o) {
@@ -224,7 +241,6 @@ class Host {
     const canStart = () => editor.dataset.ok && this.members.length >= 6;
     const start = h('button', { class: 'btn primary wide', onclick: () => this.startGame() }, '開始遊戲');
     start.disabled = !canStart();
-    const qr = h('div', { class: 'qr' });
     const list = h('div', { class: 'members' }, this.members.map((m, i) => h('div', { class: 'mem' + (m.online ? '' : ' off') },
       h('b', null, (i + 1) + '號'), h('span', null, m.name + (m.local ? '（主機）' : '') + (m.online ? '' : '（離線）') + (m.acc ? ' 📊' : '')),
       h('button', { class: 'step', disabled: i === 0, onclick: () => { this.move(i, -1); } }, '▲'),
@@ -232,17 +248,14 @@ class Host {
       m.local ? null : h('button', { class: 'step', onclick: () => this.kick(i) }, '✕'))));
     app.replaceChildren(h('div', { class: 'page' },
       h('div', { class: 'row between' }, h('h2', null, '📡 房間大廳'), h('button', { class: 'btn ghost small', onclick: () => { if (confirm('確定關閉房間？')) { this.peer.destroy(); currentHost = null; home(); } } }, '關閉房間')),
-      h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, this.code)),
-      qr,
+      roomCodeEl(this.code),
+      qrEl(this.code),
       h('p', { class: 'hint' }, '其他人打開本網頁 →「加入房間」輸入房號，或掃描 QR Code。📊 表示有輸入帳號、會記錄戰績。'),
       h('button', { class: 'btn ghost', onclick: () => rulesOverlay() }, '📖 規則說明與角色介紹'),
       h('h3', null, `玩家（${this.members.length} 人，請用 ▲▼ 排成實際座位順序）`),
       list,
       this.members.length < 6 ? h('p', { class: 'hint bad' }, '至少需要 6 名玩家') : null,
       editor, start));
-    if (location.protocol.startsWith('http')) {
-      loadScript(QR_URL).then(() => { try { new QRCode(qr, { text: joinUrl(this.code), width: 150, height: 150 }); } catch (e) { /* ignore */ } }).catch(() => {});
-    }
   }
 
   move(i, d) {
@@ -289,7 +302,7 @@ class Host {
     const pid = this.localPid();
     app.replaceChildren(renderGameView(localizeView(view), {
       control: true,
-      stripExtra: h('span', { class: 'conn' }, `房號 ${this.code}・連線 ${online}/${this.members.length}`),
+      stripExtra: h('button', { class: 'btn ghost tiny', onclick: () => roomOverlay(this.code) }, `🔗 ${this.code}・連線 ${online}/${this.members.length}`),
       onAnswer: (id, ans) => io.handle(pid, { t: 'answer', id, ans }, true),
       onLive: (id, sel) => io.handle(pid, { t: 'live', id, sel }, true),
       onAction: (a, data) => io.handle(pid, { t: 'action', id: a.id, ctx: a.ctx, data }, true),
@@ -607,7 +620,9 @@ class Client {
       const me = m.players.find(p => p.name === this.name);
       app.replaceChildren(h('div', { class: 'page' },
         h('h2', null, '🛋️ 等待開始'),
-        h('div', { class: 'roomcode' }, h('small', null, '房號'), h('b', null, m.code)),
+        roomCodeEl(m.code),
+        qrEl(m.code),
+        h('p', { class: 'hint' }, '其他人可以輸入房號或掃這個 QR Code 加入。'),
         h('div', { class: 'setup' },
           h('h3', { class: 'big-h' }, `🎴 本局角色（${countRoles(m.counts || {})} 張）`),
           m.counts ? roleChips(m.counts) : h('p', { class: 'hint' }, m.roles),
@@ -634,6 +649,7 @@ class Client {
       const send = o => this.net.send(o);
       app.replaceChildren(renderGameView(localizeView(m.view), {
         control: false,
+        stripExtra: h('button', { class: 'btn ghost tiny', onclick: () => roomOverlay(this.code) }, `🔗 ${this.code}`),
         onAnswer: (id, ans) => send({ t: 'answer', id, ans }),
         onLive: (id, sel) => send({ t: 'live', id, sel }),
         onAction: (a, data) => send({ t: 'action', id: a.id, ctx: a.ctx, data }),

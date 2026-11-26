@@ -322,7 +322,7 @@ class HostIO {
     // 公開資訊會越來越長，玩家已經有最新版本時就不重送（玩家端會沿用快取）
     const mem = !isHost && pid != null ? this.host.members[pid] : null;
     if (mem && mem.pubAck === S.pubLog.length) { delete v.pub.pubLog; v.pub.pubCached = S.pubLog.length; }
-    if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log, statsNote: S.statsNote,
+    if (S.phase === 'over') v.final = { result: S.result, sheriff: S.sheriff, log: S.log, statsNote: S.statsNote, endReason: S.endReason,
       players: S.players.map(q => ({ seat: q.seat, name: q.name, role: q.role, alive: q.alive, cause: q.cause, lover: q.lover, id: q.id, converted: q.converted, wasThief: q.wasThief })) };
     return v;
   }

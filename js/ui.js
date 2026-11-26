@@ -246,6 +246,10 @@ function publicInfoOverlay(pub) {
     d.items.push(e);
   }
   infoOverlay('📋 公開資訊',
+    h('div', { class: 'wincond' },
+      h('b', null, pub.win === 'all' ? '🏙️ 屠城' : '⚔️ 屠邊'),
+      h('span', null, pub.win === 'all' ? '狼人要殺光所有好人（神職＋平民）才獲勝' : '狼人殺光所有神職，或殺光所有平民，就獲勝'),
+      h('small', null, '好人要放逐或殺光所有狼人才獲勝。' + (pub.earlyEnd ? '已開啟提前結算：狼數 ≥ 好人數且好人沒有翻盤技能時，直接判狼人獲勝。' : ''))),
     h('h4', { class: 'grp' }, `本局角色（${countRoles(pub.roles || {})} 張）`),
     roleChips(pub.roles || {}),
     days.length ? days.slice().reverse().map(d => h('div', { class: 'pday' }, h('h4', { class: 'grp' }, `第 ${d.day} 天`),
@@ -277,6 +281,7 @@ function gameOverScreen(S, result, buttons) {
   const root = h('div', { class: 'screen' },
     h('h2', null, result ? '遊戲結束' : '遊戲中斷'),
     h('div', { class: 'big ' + rt.tone }, rt.title),
+    S.endReason ? h('p', { class: 'hint' }, S.endReason) : null,
     h('div', { class: 'reveal' }, S.players.map(p => h('div', { class: 'rv ' + team(p) + (p.alive ? '' : ' dead') },
       h('b', null, p.seat + '號'), h('span', null, p.name), h('span', { class: 'rr' }, ROLES[p.role].icon + ' ' + roleName(p)),
       h('small', null, (p.alive ? '存活' : CAUSE[p.cause]) + (p.lover != null ? ' 💞' : '') + (S.sheriff === p.id ? ' 🎖️' : ''))))),
@@ -351,6 +356,7 @@ function setupEditor(state, onChange) {
         options.map(([v, t]) => h('option', { value: String(v), selected: String(st[key]) === String(v) }, t))));
     wrap.append(h('h3', null, '規則設定'),
       sel('勝利條件', 'win', [['side', '屠邊（殺光神職或平民）'], ['all', '屠城（殺光所有好人）']]),
+      sel('提前結算', 'earlyEnd', [[true, '開啟（狼數 ≥ 好人且好人無法翻盤時直接結算）'], [false, '關閉（打到屠邊／屠城為止）']]),
       sel('警長競選', 'sheriff', [[true, '開啟'], [false, '關閉']]),
       sel('女巫自救', 'witchSelf', [['first', '僅首夜可自救'], ['never', '不可自救'], ['always', '每晚皆可自救']]),
       sel('同守同救', 'guardSave', [['die', '死亡（奶穿）'], ['live', '存活']]),
@@ -383,6 +389,7 @@ const RULES_HTML = `
 <ol>
 <li><b>發身分</b>：每位玩家私下查看自己的角色。單機模式不必照順序，各自點自己的號碼查看，全部看完才能進入黑夜。</li>
 <li><b>夜晚</b>（依序，只會叫本局有的角色）：夢魘 → 占卜師 → 盜賊（首夜）→ 丘比特（首夜）→ 情侶確認（首夜）→ 野孩子（首夜）→ 守衛 → 魔術師 → 狼人 → 狼美人 → 隱狼（首夜）→ 石像鬼 → 女巫 → 預言家 → 守墓人（第二夜起）→ 禁言長老 → 攝夢人 → 獵魔人（第二夜起）→ 烏鴉。已死亡的角色仍會被「點名」並假等待數秒，避免洩漏資訊。</li>
+<li><b>提前結算</b>（可在設定關閉，非標準規則）：存活的狼人數量大於或等於好人數量，而且好人已經沒有翻盤手段時，直接判狼人獲勝。翻盤手段包括：女巫還有毒藥、獵人存活、騎士還沒決鬥、獵魔人／魔術師／攝夢人／烏鴉存活、炸彈人存活，或人數剛好相等且好人拿著警徽（1.5 票）。有第三方情侶存活時不提前結算。</li>
 <li><b>白天</b>：首日競選警長 → 公布昨晚死亡（含熊是否咆哮、誰被禁言）→ 死亡技能／遺言 → 依序發言 → 放逐投票 → 進入黑夜。單機模式的投票由大家公開舉手，裝置上只點選結果（得票最高者、平票者或無人）；多機模式則每人在自己手機上投票。</li>
 </ol>
 <h4>特殊角色的結算細節</h4>

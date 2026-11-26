@@ -89,6 +89,7 @@ const DEFAULT_SETTINGS = {
   witchSelf: 'first',   // 女巫自救：never / first（僅首夜）/ always
   guardSave: 'die',     // 同守同救：die（奶穿，死亡）/ live（存活）
   win: 'side',          // 勝利條件：side（屠邊）/ all（屠城）
+  earlyEnd: true,       // 狼數 ≥ 好人數且好人已無翻盤手段時提前結算（非標準規則，可關閉）
   sheriff: true,        // 是否競選警長
   speechSec: 90,
   lastWordSec: 60,

@@ -104,7 +104,7 @@ function killers(S) {
 
 function publicView(S) {
   return {
-    day: S.day, phase: S.phase, sheriff: S.sheriff, roles: S.roleCounts, pubLog: S.pubLog,
+    day: S.day, phase: S.phase, sheriff: S.sheriff, roles: S.roleCounts, pubLog: S.pubLog, win: S.settings.win, earlyEnd: S.settings.earlyEnd,
     players: S.players.map(p => ({
       id: p.id, seat: p.seat, name: p.name, alive: p.alive,
       sheriff: S.sheriff === p.id, idiot: p.idiotRevealed, silenced: S.phase === 'day' && S.silenced === p.id,
@@ -153,7 +153,27 @@ function winner(S, night) {
   if (wolfWin && goodWin) return night ? 'wolf' : 'good'; // 夜晚狼人優先（刀先於毒）
   if (wolfWin) return 'wolf';
   if (goodWin) return 'good';
+  // 提前結算：狼數 ≥ 好人數，且好人已沒有任何能減少狼人或扭轉票數的手段
+  if (S.settings.earlyEnd && !thirdAlive && wolves.length && wolves.length >= good.length && !goodCanFight(S, wolves, good)) {
+    S.endReason = `場上剩 ${wolves.length} 狼、${good.length} 名好人，好人已沒有能扳回局勢的技能，提前結算。`;
+    return 'wolf';
+  }
   return null;
+}
+
+// 好人還有沒有翻盤的可能（有就不提前結算）
+function goodCanFight(S, wolves, good) {
+  const has = role => good.some(p => p.role === role);
+  if (has('witch') && S.witch.poison) return true;            // 女巫還有毒藥
+  // 獵人存活，或剛死亡還沒處理開槍
+  if (S.players.some(p => p.role === 'hunter' && !isWolf(p) && (p.alive || (!p.shotDone && !['poison', 'love', 'reflect'].includes(p.cause) && !p.noShoot)))) return true;
+  if (has('knight') && !S.knightUsed) return true;            // 騎士可決鬥
+  if (has('demonhunter') || has('magician') || has('dreamweaver')) return true; // 夜晚能讓狼死亡的技能
+  if (has('raven')) return true;                              // 詛咒可多加一票
+  if (alive(S).some(p => p.role === 'bomber')) return true;   // 第三方炸彈人仍在
+  // 人數相等時，好人警長的 1.5 票可以投出狼人
+  if (wolves.length === good.length && S.sheriff != null && good.some(p => p.id === S.sheriff)) return true;
+  return false;
 }
 
 function checkWin(S, night) {
@@ -683,7 +703,8 @@ async function deathSkill(S, io, p) {
     options: alive(S).map(q => opt(q)), select: 'one',
     buttons: [{ id: 'shoot', label: '開槍', style: 'danger', needSel: true }, { id: 'no', label: '不開槍', style: 'ghost' }],
   });
-  if (a.btn !== 'shoot') return;
+  p.shotDone = true;
+  if (a.btn !== 'shoot') { checkWin(S, false); return; }
   const q = S.players[a.sel];
   if (q.role === 'thug') {
     q.pendingCause = 'shot'; if (!S.pending.includes(q.id)) S.pending.push(q.id);

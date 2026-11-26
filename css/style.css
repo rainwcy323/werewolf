@@ -275,3 +275,6 @@ h3 { font-size: 1.05rem; color: var(--muted); }
 .rtbar i { display: block; height: 100%; background: var(--accent); }
 .rt b { text-align: right; }
 .rt small { color: var(--muted); text-align: right; font-size: .8rem; }
+.wincond { display: flex; flex-direction: column; gap: 2px; background: var(--panel2); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+.wincond b { font-size: 1.1rem; }
+.wincond small { color: var(--muted); }

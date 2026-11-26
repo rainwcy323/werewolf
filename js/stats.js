@@ -57,6 +57,13 @@ const Stats = {
       const etag = r.headers.get('ETag');
       const d = (await r.json()) || { acc: e.acc, games: 0, wins: 0, wolf: { g: 0, w: 0 }, good: { g: 0, w: 0 }, third: { g: 0, w: 0 }, recent: [] };
       d.name = e.name;
+      // 各身分戰績；舊資料沒有這一欄時，用最近戰績補回來
+      if (!d.roles) {
+        d.roles = {};
+        for (const r of d.recent || []) addRole(d.roles, r.role, r.win);
+        if ((d.recent || []).length < d.games) d.rolesPartial = true;
+      }
+      addRole(d.roles, e.role, e.win);
       d.games++; if (e.win) d.wins++;
       d[e.side] = d[e.side] || { g: 0, w: 0 };
       d[e.side].g++; if (e.win) d[e.side].w++;
@@ -79,7 +86,23 @@ const Stats = {
   },
 };
 
+function addRole(roles, role, win) {
+  const r = roles[role] = roles[role] || { g: 0, w: 0 };
+  r.g++; if (win) r.w++;
+}
+
 const pct = (w, g) => g ? Math.round(w / g * 100) + '%' : '—';
+const wg = s => `${(s && s.w) || 0}/${(s && s.g) || 0}`;
+// 依勝率排序時，同勝率以場數多者優先；沒玩過的排最後
+const rateKey = s => s && s.g ? s.w / s.g + s.g * 1e-6 : -1;
+
+// 舊資料沒有身分欄位時，從最近戰績估算
+function rolesOf(d) {
+  if (d.roles) return d.roles;
+  const roles = {};
+  for (const r of d.recent || []) addRole(roles, r.role, r.win);
+  return roles;
+}
 const SIDE_NAME = { wolf: '狼人', good: '好人', third: '第三方' };
 
 /* ───────────── 戰績頁 ───────────── */
@@ -94,11 +117,11 @@ async function statsPage() {
   try { list = await Stats.list(); } catch (e) { body.replaceChildren(h('p', { class: 'hint bad' }, '無法讀取戰績：' + e.message)); return; }
   const search = h('input', { placeholder: '搜尋帳號或暱稱', oninput: () => draw() });
   const sort = h('select', { onchange: () => draw() },
-    [['games', '依總局數'], ['wins', '依勝局數'], ['rate', '依勝率'], ['updated', '依最近遊玩']].map(([v, t]) => h('option', { value: v }, t)));
+    [['games', '依總局數'], ['wins', '依勝局數'], ['rate', '依總勝率'], ['good', '依好人陣營勝率'], ['wolf', '依狼人陣營勝率'], ['updated', '依最近遊玩']].map(([v, t]) => h('option', { value: v }, t)));
   const table = h('div', { class: 'stlist' });
   const key = {
     games: d => d.games, wins: d => d.wins, updated: d => d.updated || 0,
-    rate: d => d.games ? d.wins / d.games + d.games * 1e-6 : -1,
+    rate: d => rateKey({ w: d.wins, g: d.games }), good: d => rateKey(d.good), wolf: d => rateKey(d.wolf),
   };
   const draw = () => {
     const q = search.value.trim().toLowerCase();
@@ -107,14 +130,29 @@ async function statsPage() {
     table.replaceChildren(...(rows.length ? rows.map(d => h('button', { class: 'strow', onclick: () => statsDetail(d) },
       h('div', { class: 'stname' }, h('b', null, d.name || d.acc), h('small', null, '@' + d.acc)),
       h('div', { class: 'stnums' },
-        h('span', null, h('b', null, d.games), h('small', null, '局')),
-        h('span', null, h('b', null, pct(d.wins, d.games)), h('small', null, '勝率')),
-        h('span', { class: 'wolf' }, h('b', null, pct(d.wolf && d.wolf.w, d.wolf && d.wolf.g)), h('small', null, '狼')),
-        h('span', { class: 'good' }, h('b', null, pct(d.good && d.good.w, d.good && d.good.g)), h('small', null, '好人')))))
+        h('span', null, h('small', null, '總計'), h('b', null, pct(d.wins, d.games)), h('small', null, wg({ w: d.wins, g: d.games }))),
+        h('span', { class: 'good' }, h('small', null, '好人'), h('b', null, pct(d.good && d.good.w, d.good && d.good.g)), h('small', null, wg(d.good))),
+        h('span', { class: 'wolf' }, h('small', null, '狼人'), h('b', null, pct(d.wolf && d.wolf.w, d.wolf && d.wolf.g)), h('small', null, wg(d.wolf))))))
       : [h('p', { class: 'hint' }, list.length ? '找不到符合的玩家' : '還沒有任何戰績。多機模式加入房間時輸入帳號，遊戲結束後就會記錄。')]));
   };
   body.replaceChildren(h('div', { class: 'row' }, search, sort), table);
   draw();
+}
+
+function roleTable(d) {
+  const roles = rolesOf(d);
+  const keys = Object.keys(roles).filter(k => roles[k].g).sort((a, b) => roles[b].g - roles[a].g || rateKey(roles[b]) - rateKey(roles[a]));
+  if (!keys.length) return h('p', { class: 'hint' }, '還沒有資料。');
+  const partial = !d.roles || d.rolesPartial;
+  return h('div', null,
+    h('div', { class: 'roletab' }, keys.map(k => {
+      const r = roles[k], role = ROLES[k] || { icon: '', name: k, team: '' };
+      return h('div', { class: 'rt ' + role.team },
+        h('span', { class: 'rti' }, role.icon), h('span', { class: 'rtn' }, role.name),
+        h('span', { class: 'rtbar' }, h('i', { style: `width:${Math.round(r.w / r.g * 100)}%` })),
+        h('b', null, pct(r.w, r.g)), h('small', null, wg(r)));
+    })),
+    partial ? h('p', { class: 'hint' }, '※ 這個帳號較早的對局沒有記錄身分，以上只統計最近的對局。') : null);
 }
 
 function statsDetail(d) {
@@ -129,6 +167,8 @@ function statsDetail(d) {
       h('div', { class: 'stat' }, h('small', null, '勝局數'), h('b', null, d.wins)),
       h('div', { class: 'stat' }, h('small', null, '總勝率'), h('b', null, pct(d.wins, d.games))),
       side('wolf'), side('good'), (d.third && d.third.g) ? side('third') : null),
+    h('h3', null, '各身分勝率'),
+    roleTable(d),
     h('h3', null, `最近戰績（最多 ${RECENT_MAX} 局）`),
     h('div', { class: 'recent' }, (d.recent || []).map(r => h('div', { class: 'rec ' + (r.win ? 'win' : 'lose') },
       h('b', null, r.win ? '勝' : '敗'),

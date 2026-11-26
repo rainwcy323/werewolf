@@ -260,3 +260,18 @@ h3 { font-size: 1.05rem; color: var(--muted); }
 .pitem .text { margin: 4px 0 0; font-size: .92rem; }
 .setup .big-h { color: var(--text); font-size: 1.2rem; margin: 0 0 4px; }
 .note { white-space: pre-line; background: var(--panel2); border-radius: 10px; padding: 10px 12px; margin-top: 10px; font-size: .92rem; }
+
+/* 戰績：列表數字與各身分勝率 */
+.stnums span small:first-child { order: -1; }
+.stnums { gap: 14px; }
+.stnums span { min-width: 3.4em; }
+.roletab { display: flex; flex-direction: column; gap: 6px; }
+.rt { display: grid; grid-template-columns: 1.6em minmax(4.5em, auto) 1fr 3em 3.6em; align-items: center; gap: 8px; background: var(--panel); border-radius: 10px; padding: 8px 12px; border-left: 4px solid var(--good); }
+.rt.wolf { border-left-color: var(--wolf); }
+.rt.third { border-left-color: var(--love); }
+.rti { text-align: center; }
+.rtn { font-weight: 700; white-space: nowrap; }
+.rtbar { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
+.rtbar i { display: block; height: 100%; background: var(--accent); }
+.rt b { text-align: right; }
+.rt small { color: var(--muted); text-align: right; font-size: .8rem; }

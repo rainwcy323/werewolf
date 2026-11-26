@@ -814,7 +814,7 @@ async function runVote(S, io, voters, cands, title, useSheriff, curse) {
   const lines = [];
   for (const t of order) {
     lines.push(`【${lbl(S.players[t])}】${tally[t]} 票`);
-    for (const v of detail[t]) lines.push(`　${v} → ${S.players[t].seat}號`);
+    for (const v of detail[t]) lines.push(`　${v}`);
   }
   if (abstain.length) { lines.push('【棄票】'); for (const v of abstain) lines.push('　' + v); }
   S.log.push(`${title}：` + (order.map(t => `${S.players[t].seat}號 ${tally[t]} 票（${detail[t].join('、')}）`).concat(abstain.length ? ['棄票：' + abstain.join('、')] : []).join('；') || '全員棄票'));
